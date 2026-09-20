@@ -36,5 +36,9 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 utoipa.workspace = true
 
+[features]
+default = []
+cuda = ["objexel-detector/cuda"]
+
 [dev-dependencies]
 tower = "0.5"

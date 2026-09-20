@@ -44,7 +44,15 @@ The setup endpoint is permanently disabled after the first user is created.
 
 ## CPU-only and NVIDIA
 
-CPU-only deployments need no extra runtime flags. NVIDIA deployments require a working NVIDIA driver, NVIDIA Container Toolkit, and a CUDA-compatible ONNX Runtime build. Verify the host with `nvidia-smi`, then pass GPU access through your deployment environment and benchmark the model before enabling high camera counts. Tesla P4, RTX 3060, and Intel N100 performance depends on model size, stream resolution, and frame rate; measure the actual workload.
+The default Compose build compiles an ONNX Runtime CPU binary that runs on any x86-64 host without special runtime flags.
+
+NVIDIA GPU deployments require a working NVIDIA driver and NVIDIA Container Toolkit on the host (`nvidia-smi`). Build the API with CUDA enabled by adding the GPU override file, then benchmark the model before enabling high camera counts:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+```
+
+The override passes `--features cuda` to the build (compiling a CUDA-enabled ONNX Runtime) and exposes the GPU through `deploy.resources`. Machines building without the override get the CPU build, so one repo serves both host types. Tesla P4, RTX 3060, and Intel N100 performance depends on model size, stream resolution, and frame rate; measure the actual workload.
 
 ## Native Debian
 

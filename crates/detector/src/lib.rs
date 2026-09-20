@@ -51,13 +51,14 @@ impl ModelManager {
         // across the map lock below.
         let loaded = {
             let mut builder = Session::builder().context("create ONNX Runtime session builder")?;
-            // Prefer CUDA when available, while retaining the built-in CPU provider as a
-            // portable fallback for N100 and other CPU-only hosts. A failed provider
-            // configuration recovers the builder so the session still loads with defaults.
-            builder = match builder.with_execution_providers([
-                ep::CUDA::default().build(),
-                ep::CPU::default().build(),
-            ]) {
+            // Prefer CUDA when compiled with the cuda feature, while retaining the built-in
+            // CPU provider as a portable fallback for N100 and other CPU-only hosts. A failed
+            // provider configuration recovers the builder so the session still loads with defaults.
+            #[cfg(feature = "cuda")]
+            let providers = [ep::CUDA::default().build(), ep::CPU::default().build()];
+            #[cfg(not(feature = "cuda"))]
+            let providers = [ep::CPU::default().build()];
+            builder = match builder.with_execution_providers(providers) {
                 Ok(builder) => builder,
                 Err(error) => {
                     tracing::warn!(error = %error.message(), "failed to configure ONNX execution providers; using runtime defaults");

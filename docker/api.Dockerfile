@@ -1,7 +1,8 @@
 FROM rust:1-trixie AS builder
 WORKDIR /src
 COPY . .
-RUN cargo build --release -p objexel-api
+ARG FEATURES=""
+RUN cargo build --release -p objexel-api ${FEATURES:+--features ${FEATURES}}
 
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates ffmpeg wget tini && rm -rf /var/lib/apt/lists/*

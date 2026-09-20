@@ -1,0 +1,12 @@
+services:
+  api:
+    build:
+      args:
+        FEATURES: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

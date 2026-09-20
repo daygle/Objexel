@@ -4,6 +4,10 @@
 
 Check `docker compose logs api` and `/readiness`. A missing or unreachable `DATABASE_URL` causes startup retries. Migration errors are fatal by design; correct the migration or database state and restart without deleting data.
 
+### Container restarts with exit code 132
+
+Exit code 132 (SIGILL) means the API binary executed a CPU instruction the host does not support. The default CPU build requires at least SSE2 (a baseline x86-64 CPU); GPU builds assume a modern CPU with AVX/AVX2. QEMU or older virtual CPUs may expose neither, so `docker compose build api` from the default compose file is the correct deployment for those hosts (see INSTALL.md "CPU-only and NVIDIA"). Verify with `grep -m1 avx2 /proc/cpuinfo`.
+
 ## Cameras reconnect repeatedly
 
 Check the camera network route, RTSP credentials, codec support, and `ffprobe` errors in logs. The monitor backs off up to 60 seconds. Test one camera at a time before increasing concurrency.
