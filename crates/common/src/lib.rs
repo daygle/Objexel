@@ -300,6 +300,8 @@ pub struct RuleConditionInput {
     pub zone_id: Option<Uuid>,
     pub observation_type: Option<String>,
     pub behaviour_type: Option<String>,
+    pub identity_id: Option<Uuid>,
+    pub familiarity: Option<String>,
     pub confidence_threshold: Option<f32>,
     pub minimum_duration_ms: Option<i64>,
 }
@@ -471,6 +473,41 @@ pub struct Behaviour {
     pub end_time: DateTime<Utc>,
     pub recording_id: Option<Uuid>,
     pub clip_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Identity {
+    pub id: Uuid,
+    pub object_class: String,
+    pub display_name: Option<String>,
+    pub familiarity_score: f32,
+    pub familiarity: String,
+    pub first_seen: DateTime<Utc>,
+    pub last_seen: DateTime<Utc>,
+    pub sightings: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IdentityObservation {
+    pub id: Uuid,
+    pub identity_id: Uuid,
+    pub track_id: Uuid,
+    pub camera_id: Uuid,
+    pub similarity: f32,
+    pub observed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IdentityStatistics {
+    pub identity_id: Uuid,
+    pub average_duration_ms: i64,
+    pub active_days: i64,
+    pub top_zone_id: Option<Uuid>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct UpdateIdentity {
+    pub display_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]

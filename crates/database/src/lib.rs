@@ -1,12 +1,15 @@
 use anyhow::Context;
 use objexel_analytics::{AnalyticsMetric, AnalyticsSnapshot, AnalyticsSummary};
 use objexel_behaviour::Behaviour;
-use objexel_common::{CreateModelAssignment, FusionResult, ModelAssignment};
+use objexel_identity::{familiarity, new_identity, score, similarity, signature, ObjectSignature};
+use objexel_common::{CreateModelAssignment, FusionResult, Identity, IdentityObservation, IdentityStatistics, ModelAssignment, UpdateIdentity};
 use objexel_search::{SearchFilters, SearchResult};
 use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, Clip, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, CreateZone, Detection, Event, EventSeverity, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, RuleCondition, RuleConditionInput, Snapshot, Track, UpdateAction, UpdateCamera, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent, ZoneEventType};
 use serde_json::Value;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use uuid::Uuid;
+mod identity_helpers;
+use identity_helpers::{identity_from_row, identity_observation_from_row, identity_statistics_from_row};
 
 #[derive(Clone)]
 pub struct Database {
@@ -319,15 +322,15 @@ impl Database {
     async fn replace_rule_conditions(&self, rule_id: Uuid, conditions: Vec<RuleConditionInput>) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM rule_conditions WHERE rule_id=$1").bind(rule_id).execute(&self.pool).await?;
         for condition in conditions {
-            sqlx::query("INSERT INTO rule_conditions (id,rule_id,object_class,zone_id,observation_type,behaviour_type,confidence_threshold,minimum_duration_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
-                .bind(Uuid::new_v4()).bind(rule_id).bind(condition.object_class).bind(condition.zone_id).bind(condition.observation_type).bind(condition.behaviour_type).bind(condition.confidence_threshold).bind(condition.minimum_duration_ms).execute(&self.pool).await?;
+            sqlx::query("INSERT INTO rule_conditions (id,rule_id,object_class,zone_id,observation_type,behaviour_type,identity_id,familiarity,confidence_threshold,minimum_duration_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
+                .bind(Uuid::new_v4()).bind(rule_id).bind(condition.object_class).bind(condition.zone_id).bind(condition.observation_type).bind(condition.behaviour_type).bind(condition.identity_id).bind(condition.familiarity).bind(condition.confidence_threshold).bind(condition.minimum_duration_ms).execute(&self.pool).await?;
         }
         Ok(())
     }
 
     async fn rule_from_row(&self, row: sqlx::postgres::PgRow) -> anyhow::Result<Rule> {
         let id: Uuid = row.try_get("id")?;
-        let condition_rows = sqlx::query("SELECT id,rule_id,object_class,zone_id,observation_type,behaviour_type,confidence_threshold,minimum_duration_ms FROM rule_conditions WHERE rule_id=$1").bind(id).fetch_all(&self.pool).await?;
+        let condition_rows = sqlx::query("SELECT id,rule_id,object_class,zone_id,observation_type,behaviour_type,identity_id,familiarity,confidence_threshold,minimum_duration_ms FROM rule_conditions WHERE rule_id=$1").bind(id).fetch_all(&self.pool).await?;
         let conditions = condition_rows.into_iter().map(condition_from_row).collect::<anyhow::Result<Vec<_>>>()?;
         let action_rows = sqlx::query("SELECT action_id FROM rule_actions WHERE rule_id=$1").bind(id).fetch_all(&self.pool).await?;
         let action_ids = action_rows.into_iter().map(|action| action.try_get("action_id")).collect::<Result<Vec<Uuid>, _>>()?;
@@ -560,6 +563,58 @@ impl Database {
     pub async fn search_behaviours(&self, filters: &SearchFilters) -> anyhow::Result<Vec<SearchResult>> {
         let rows = sqlx::query("SELECT id,camera_id,object_class,behaviour_type,summary,end_time,confidence,recording_id,clip_id FROM behaviours WHERE ($1::text IS NULL OR behaviour_type=$1 OR summary ILIKE '%' || $1 || '%' OR object_class ILIKE '%' || $1 || '%') AND ($2::uuid IS NULL OR camera_id=$2) AND ($3::text IS NULL OR object_class=$3) AND ($4::timestamptz IS NULL OR end_time >= $4) AND ($5::timestamptz IS NULL OR end_time <= $5) ORDER BY end_time DESC LIMIT $6").bind(&filters.behaviour_type).bind(filters.camera_id).bind(&filters.object_class).bind(filters.from).bind(filters.to).bind(filters.limit()).fetch_all(&self.pool).await?;
         rows.into_iter().map(|row| Ok(SearchResult { entity_type: "behaviour".into(), id: row.try_get("id")?, camera_id: row.try_get("camera_id")?, object_class: row.try_get("object_class")?, summary: row.try_get("summary")?, occurred_at: row.try_get("end_time")?, confidence: row.try_get("confidence")?, zone_id: None, model_id: None, recording_id: row.try_get("recording_id")?, clip_id: row.try_get("clip_id")?, snapshot_id: None })).collect()
+    }
+
+    pub async fn list_identities(&self, limit: i64) -> anyhow::Result<Vec<Identity>> {
+        let rows = sqlx::query("SELECT id,object_class,display_name,familiarity_score,familiarity,first_seen,last_seen,sightings FROM identities ORDER BY last_seen DESC LIMIT $1").bind(limit.clamp(1,500)).fetch_all(&self.pool).await?;
+        rows.into_iter().map(identity_from_row).collect()
+    }
+
+    pub async fn get_identity(&self, id: Uuid) -> anyhow::Result<Option<Identity>> {
+        let row = sqlx::query("SELECT id,object_class,display_name,familiarity_score,familiarity,first_seen,last_seen,sightings FROM identities WHERE id=$1").bind(id).fetch_optional(&self.pool).await?;
+        row.map(identity_from_row).transpose()
+    }
+
+    pub async fn update_identity(&self, id: Uuid, input: UpdateIdentity) -> anyhow::Result<Option<Identity>> {
+        let result = sqlx::query("UPDATE identities SET display_name=$2 WHERE id=$1").bind(id).bind(input.display_name).execute(&self.pool).await?;
+        if result.rows_affected() == 0 { return Ok(None); }
+        self.get_identity(id).await
+    }
+
+    pub async fn identity_history(&self, id: Uuid, limit: i64) -> anyhow::Result<Vec<IdentityObservation>> {
+        let rows = sqlx::query("SELECT id,identity_id,track_id,camera_id,similarity,observed_at FROM identity_observations WHERE identity_id=$1 ORDER BY observed_at DESC LIMIT $2").bind(id).bind(limit.clamp(1,500)).fetch_all(&self.pool).await?;
+        rows.into_iter().map(identity_observation_from_row).collect()
+    }
+
+    pub async fn identity_statistics(&self, id: Uuid) -> anyhow::Result<Option<IdentityStatistics>> {
+        let row = sqlx::query("SELECT identity_id,average_duration_ms,active_days,top_zone_id FROM identity_statistics WHERE identity_id=$1").bind(id).fetch_optional(&self.pool).await?;
+        row.map(identity_statistics_from_row).transpose()
+    }
+
+    pub async fn assign_identity(&self, track: &Track) -> anyhow::Result<Identity> {
+        let candidate_rows = sqlx::query("SELECT id,object_class,display_name,familiarity_score,familiarity,first_seen,last_seen,sightings,signature FROM identities WHERE object_class=$1 ORDER BY last_seen DESC LIMIT 50").bind(&track.object_class).fetch_all(&self.pool).await?;
+        let current = signature(track);
+        let mut best: Option<(Identity, f32)> = None;
+        for row in candidate_rows {
+            let identity = identity_from_row(row.clone())?;
+            let stored: Value = row.try_get("signature")?;
+            let stored: ObjectSignature = serde_json::from_value(stored)?;
+            let value = similarity(&current, &stored);
+            if value >= 0.72 && best.as_ref().map(|(_, score)| value > *score).unwrap_or(true) { best = Some((identity, value)); }
+        }
+        let (identity, match_score) = best.unwrap_or_else(|| (new_identity(track, track.last_seen), 0.0));
+        let sig = serde_json::to_value(current)?;
+        let identity = if match_score == 0.0 {
+            sqlx::query("INSERT INTO identities (id,object_class,signature,familiarity_score,familiarity,first_seen,last_seen,sightings) VALUES ($1,$2,$3,$4,$5,$6,$6,1)").bind(identity.id).bind(&identity.object_class).bind(sig).bind(identity.familiarity_score).bind(&identity.familiarity).bind(track.last_seen).execute(&self.pool).await?;
+            identity
+        } else {
+            let sightings = identity.sightings + 1;
+            sqlx::query("UPDATE identities SET signature=$2,last_seen=$3,sightings=$4,familiarity_score=$5,familiarity=$6 WHERE id=$1").bind(identity.id).bind(sig).bind(track.last_seen).bind(sightings).bind(score(sightings)).bind(familiarity(sightings)).execute(&self.pool).await?;
+            Identity { sightings, last_seen: track.last_seen, familiarity_score: score(sightings), familiarity: familiarity(sightings).into(), ..identity }
+        };
+        sqlx::query("INSERT INTO identity_observations (identity_id,track_id,camera_id,similarity,observed_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (identity_id,track_id) DO NOTHING").bind(identity.id).bind(track.id).bind(track.camera_id).bind(match_score.max(1.0)).bind(track.last_seen).execute(&self.pool).await?;
+        sqlx::query("INSERT INTO identity_statistics (identity_id,average_duration_ms,active_days) VALUES ($1,$2,1) ON CONFLICT (identity_id) DO UPDATE SET average_duration_ms=((identity_statistics.average_duration_ms + EXCLUDED.average_duration_ms)/2),active_days=identity_statistics.active_days+1").bind(identity.id).bind(track.duration_ms).execute(&self.pool).await?;
+        Ok(identity)
     }
 
     pub async fn delete_camera(&self, id: Uuid) -> anyhow::Result<bool> {

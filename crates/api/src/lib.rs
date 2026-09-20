@@ -9,7 +9,7 @@ use axum::{
 use chrono::Utc;
 use objexel_actions::ActionDispatcher;
 use objexel_analytics::AnalyticsSummary;
-use objexel_common::{Behaviour, CreateModelAssignment, FusionResult, ModelAssignment};
+use objexel_common::{Behaviour, CreateModelAssignment, FusionResult, Identity, IdentityObservation, IdentityStatistics, ModelAssignment, UpdateIdentity};
 use objexel_camera::{CameraManager, CameraService};
 use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, CameraTestResult, Clip, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, Detection, Event, HealthResponse, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, Snapshot, StreamMetadata, Track, UpdateAction, UpdateCamera, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent};
 use objexel_pipeline::ObservationPipeline;
@@ -36,8 +36,8 @@ pub struct AppState {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, list_templates, create_template, test_notification, global_search, search_events, search_observations, search_tracks, search_recordings, search_detections, search_behaviours, list_behaviours, get_behaviour, list_fusion, list_model_assignments, create_model_assignment, analytics_summary, analytics_cameras, analytics_zones, analytics_models, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
-    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Recording, Clip, Snapshot, SearchResult, AnalyticsSummary, Behaviour, ModelAssignment, CreateModelAssignment, FusionResult, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
+    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, list_templates, create_template, test_notification, global_search, search_events, search_observations, search_tracks, search_recordings, search_detections, search_behaviours, list_behaviours, get_behaviour, list_identities, get_identity, update_identity, identity_history, list_fusion, list_model_assignments, create_model_assignment, analytics_summary, analytics_cameras, analytics_zones, analytics_models, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
+    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Recording, Clip, Snapshot, SearchResult, AnalyticsSummary, Behaviour, Identity, IdentityObservation, IdentityStatistics, UpdateIdentity, ModelAssignment, CreateModelAssignment, FusionResult, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
     tags((name = "cameras", description = "Camera management and RTSP ingestion"))
 )]
 pub struct ApiDoc;
@@ -86,6 +86,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/search/behaviours", get(search_behaviours))
         .route("/api/behaviours", get(list_behaviours))
         .route("/api/behaviours/:id", get(get_behaviour))
+        .route("/api/identities", get(list_identities))
+        .route("/api/identities/:id", get(get_identity).put(update_identity))
+        .route("/api/identities/:id/history", get(identity_history))
         .route("/api/fusion", get(list_fusion))
         .route("/api/model-assignments", get(list_model_assignments).post(create_model_assignment))
         .route("/api/analytics", get(analytics_summary))
@@ -343,6 +346,18 @@ async fn list_behaviours(State(state): State<Arc<AppState>>, Query(query): Query
 
 #[utoipa::path(get, path = "/api/behaviours/{id}", tag = "behaviour", params(("id" = Uuid, Path)), responses((status = 200, body = Behaviour), (status = 404), (status = 503)))]
 async fn get_behaviour(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Behaviour>, ErrorResponse> { match database(&state)?.get_behaviour(id).await.map_err(internal_error)? { Some(item) => Ok(Json(item)), None => Err(not_found("behaviour not found")) } }
+
+#[utoipa::path(get, path = "/api/identities", tag = "identity", responses((status = 200, body = [Identity]), (status = 503)))]
+async fn list_identities(State(state): State<Arc<AppState>>, Query(query): Query<LimitQuery>) -> Result<Json<Vec<Identity>>, ErrorResponse> { database(&state)?.list_identities(query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/identities/{id}", tag = "identity", params(("id" = Uuid, Path)), responses((status = 200, body = Identity), (status = 404), (status = 503)))]
+async fn get_identity(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Identity>, ErrorResponse> { match database(&state)?.get_identity(id).await.map_err(internal_error)? { Some(item) => Ok(Json(item)), None => Err(not_found("identity not found")) } }
+
+#[utoipa::path(put, path = "/api/identities/{id}", tag = "identity", params(("id" = Uuid, Path)), request_body = UpdateIdentity, responses((status = 200, body = Identity), (status = 404), (status = 503)))]
+async fn update_identity(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>, Json(input): Json<UpdateIdentity>) -> Result<Json<Identity>, ErrorResponse> { match database(&state)?.update_identity(id, input).await.map_err(internal_error)? { Some(item) => Ok(Json(item)), None => Err(not_found("identity not found")) } }
+
+#[utoipa::path(get, path = "/api/identities/{id}/history", tag = "identity", params(("id" = Uuid, Path)), responses((status = 200, body = [IdentityObservation]), (status = 503)))]
+async fn identity_history(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>, Query(query): Query<LimitQuery>) -> Result<Json<Vec<IdentityObservation>>, ErrorResponse> { database(&state)?.identity_history(id, query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error) }
 
 #[utoipa::path(get, path = "/api/fusion", tag = "fusion", responses((status = 200, body = [FusionResult]), (status = 503)))]
 async fn list_fusion(State(state): State<Arc<AppState>>, Query(query): Query<MediaQuery>) -> Result<Json<Vec<FusionResult>>, ErrorResponse> { database(&state)?.list_fusion_results(query.camera_id, query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error) }

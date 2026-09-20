@@ -1,0 +1,11 @@
+[package]
+name = "objexel-identity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+objexel-common = { path = "../common" }
+serde.workspace = true
+uuid.workspace = true

@@ -10,6 +10,7 @@ chrono.workspace = true
 objexel-common = { path = "../common" }
 objexel-analytics = { path = "../analytics" }
 objexel-behaviour = { path = "../behaviour" }
+objexel-identity = { path = "../identity" }
 objexel-search = { path = "../search" }
 serde_json.workspace = true
 sqlx.workspace = true

@@ -83,7 +83,8 @@ impl ObservationPipeline {
             let detection = detections.iter().find(|detection| detection.track_id == Some(observation.track_id));
             let zone_id = zone_events.iter().find(|event| event.track_id == observation.track_id).map(|event| event.zone_id);
             let behaviour_type = behaviours.iter().find(|behaviour| behaviour.track_id == observation.track_id).map(|behaviour| behaviour.behaviour_type.as_str());
-            let context = ObservationContext { observation, object_class: track.map(|track| track.object_class.as_str()), zone_id, confidence: detection.map(|detection| detection.confidence), duration_ms: track.map(|track| track.duration_ms), behaviour_type };
+            let identity = match track { Some(track) => Some(self.database.assign_identity(track).await?), None => None };
+            let context = ObservationContext { observation, object_class: track.map(|track| track.object_class.as_str()), zone_id, confidence: detection.map(|detection| detection.confidence), duration_ms: track.map(|track| track.duration_ms), behaviour_type, identity_id: identity.as_ref().map(|item| item.id), familiarity: identity.as_ref().map(|item| item.familiarity.as_str()) };
             for event in rule_engine.evaluate(&rules, context, now) {
                 self.database.insert_event(&event).await?;
                 self.database.insert_notification(&event).await?;
