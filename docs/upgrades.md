@@ -53,3 +53,9 @@ Set `OBJEXEL_IMAGE_TAG` to the previously verified release tag so Compose runs t
 ## Release process
 
 Tagged releases use `.github/workflows/release.yml` to build and publish a versioned image to GitHub Container Registry and create GitHub release notes. Push a semantic-version tag such as `v0.2.0` only after CI, migration review, and an end-to-end camera test pass.
+
+**Bump the version before tagging.** The running server reports its own version from the compiled `CARGO_PKG_VERSION` (the `[workspace.package] version` in `Cargo.toml`), and the dashboard's "update available" banner compares that against the latest GitHub release tag. If the tag is ahead of the compiled version, every server shows a false "update available". So for each release:
+
+1. Set `[workspace.package] version` in `Cargo.toml` to the release version (e.g. `1.0.0`), matching the tag you will push (`v1.0.0`).
+2. Regenerate the lockfile (`cargo update --workspace` or any `cargo` invocation) and commit both.
+3. Merge, then tag and push (`git tag v1.0.0 && git push origin v1.0.0`).
