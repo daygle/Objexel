@@ -27,7 +27,7 @@ curl -fsS http://localhost:8080/liveness
 
 Open `http://SERVER:8080/setup` to create the first administrator. The setup route is permanently disabled after the first account exists. Then sign in, add a camera, and configure a model.
 
-See [INSTALL.md](INSTALL.md) for CPU-only, NVIDIA, Tesla P4, native Debian, and Proxmox guidance.
+See [docs/installation.md](docs/installation.md) for CPU-only, NVIDIA, Tesla P4, native Debian, and Proxmox guidance.
 
 ## Models
 
@@ -54,7 +54,7 @@ Updates are deliberately operator-controlled:
 4. Apply migrations through the normal API startup.
 5. Verify health, login, one camera, one model, one detection, one event, and one clip.
 
-Tagged releases publish versioned Docker images to GitHub Container Registry and generate release notes through GitHub Actions. See [UPGRADE.md](UPGRADE.md), [BACKUP.md](BACKUP.md), and [OPERATIONS.md](OPERATIONS.md).
+Tagged releases publish versioned Docker images to GitHub Container Registry and generate release notes through GitHub Actions. See [docs/upgrades.md](docs/upgrades.md), [docs/backup.md](docs/backup.md), and [docs/operations.md](docs/operations.md).
 
 ## Authentication
 

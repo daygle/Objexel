@@ -24,7 +24,7 @@ Back up `docker-compose.yml`, model manifests, and the non-secret deployment con
 
 ## Validation and disaster recovery
 
-A backup is valid only after checksum verification, PostgreSQL restore, migration/readiness checks, and opening a representative clip and snapshot. For disaster recovery, provision Debian 13 or a Proxmox VM, install Objexel from `INSTALL.md`, restore PostgreSQL, restore media, verify `/liveness`, `/readiness`, `/metrics`, then test one camera and one event. Rotate passwords and provider credentials if the original host was compromised.
+A backup is valid only after checksum verification, PostgreSQL restore, migration/readiness checks, and opening a representative clip and snapshot. For disaster recovery, provision Debian 13 or a Proxmox VM, install Objexel from `installation.md`, restore PostgreSQL, restore media, verify `/liveness`, `/readiness`, `/metrics`, then test one camera and one event. Rotate passwords and provider credentials if the original host was compromised.
 
 ## Configuration export/import
 

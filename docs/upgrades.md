@@ -6,7 +6,7 @@ Objexel uses an operator-controlled update channel. It never replaces a running 
 
 1. Review the GitHub release notes and image digest.
 2. In the web UI, open the update notice or select **Check for updates**. This queries the latest `daygle/Objexel` GitHub release; forks can point it elsewhere with `OBJEXEL_UPDATE_REPO` (e.g. `owner/repo`).
-3. Back up PostgreSQL, configuration, model metadata, and media metadata. See [BACKUP.md](BACKUP.md).
+3. Back up PostgreSQL, configuration, model metadata, and media metadata. See [backup.md](backup.md).
 4. Confirm there is enough disk space for the new image, migrations, and temporary model/download files.
 5. Record the current image tag and verify a rollback image is available.
 

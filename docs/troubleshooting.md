@@ -6,7 +6,7 @@ Check `docker compose logs api` and `/readiness`. A missing or unreachable `DATA
 
 ### Container restarts with exit code 132
 
-Exit code 132 (SIGILL) means the API binary executed a CPU instruction the host does not support. The default CPU build requires at least SSE2 (a baseline x86-64 CPU); GPU builds assume a modern CPU with AVX/AVX2. QEMU or older virtual CPUs may expose neither, so `docker compose build api` from the default compose file is the correct deployment for those hosts (see INSTALL.md "CPU-only and NVIDIA"). Verify with `grep -m1 avx2 /proc/cpuinfo`.
+Exit code 132 (SIGILL) means the API binary executed a CPU instruction the host does not support. The default CPU build requires at least SSE2 (a baseline x86-64 CPU); GPU builds assume a modern CPU with AVX/AVX2. QEMU or older virtual CPUs may expose neither, so `docker compose build api` from the default compose file is the correct deployment for those hosts (see installation.md "CPU-only and NVIDIA"). Verify with `grep -m1 avx2 /proc/cpuinfo`.
 
 ## Cameras reconnect repeatedly
 
