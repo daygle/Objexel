@@ -1,4 +1,4 @@
-CREATE TABLE rules (
+CREATE TABLE IF NOT EXISTS rules (
     id UUID PRIMARY KEY,
     name TEXT NOT NULL,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -10,7 +10,7 @@ CREATE TABLE rules (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE rule_conditions (
+CREATE TABLE IF NOT EXISTS rule_conditions (
     id UUID PRIMARY KEY,
     rule_id UUID NOT NULL REFERENCES rules(id) ON DELETE CASCADE,
     object_class TEXT,
@@ -23,12 +23,12 @@ CREATE TABLE rule_conditions (
 CREATE INDEX rule_conditions_rule_idx ON rule_conditions (rule_id);
 
 ALTER TABLE events
-    ADD COLUMN rule_id UUID REFERENCES rules(id) ON DELETE CASCADE,
-    ADD COLUMN track_id UUID REFERENCES tracks(id) ON DELETE SET NULL,
-    ADD COLUMN observation_id UUID REFERENCES observations(id) ON DELETE SET NULL,
-    ADD COLUMN event_type TEXT,
-    ADD COLUMN summary TEXT,
-    ADD COLUMN severity TEXT DEFAULT 'info';
+    ADD COLUMN IF NOT EXISTS rule_id UUID REFERENCES rules(id) ON DELETE CASCADE,
+    ADD COLUMN IF NOT EXISTS track_id UUID REFERENCES tracks(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS observation_id UUID REFERENCES observations(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS event_type TEXT,
+    ADD COLUMN IF NOT EXISTS summary TEXT,
+    ADD COLUMN IF NOT EXISTS severity TEXT DEFAULT 'info';
 
 UPDATE events
 SET event_type = COALESCE(event_type, kind),

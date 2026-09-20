@@ -1,4 +1,4 @@
-CREATE TABLE zones (
+CREATE TABLE IF NOT EXISTS zones (
     id UUID PRIMARY KEY,
     camera_id UUID NOT NULL REFERENCES cameras(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
@@ -11,7 +11,7 @@ CREATE TABLE zones (
 
 CREATE INDEX zones_camera_enabled_idx ON zones (camera_id, enabled);
 
-CREATE TABLE zone_events (
+CREATE TABLE IF NOT EXISTS zone_events (
     id UUID PRIMARY KEY,
     zone_id UUID NOT NULL REFERENCES zones(id) ON DELETE CASCADE,
     camera_id UUID NOT NULL REFERENCES cameras(id) ON DELETE CASCADE,
