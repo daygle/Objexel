@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CameraStatus {
     Online,
@@ -15,7 +15,7 @@ impl Default for CameraStatus {
     fn default() -> Self { Self::Unknown }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Camera {
     pub id: Uuid,
     pub name: String,
@@ -26,7 +26,7 @@ pub struct Camera {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct CreateCamera {
     pub name: String,
     pub rtsp_url: String,
@@ -36,9 +36,16 @@ pub struct CreateCamera {
 
 fn default_enabled() -> bool { true }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct UpdateCamera {
+    pub name: Option<String>,
+    pub rtsp_url: Option<String>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct HealthResponse {
-    pub status: &'static str,
-    pub service: &'static str,
-    pub version: &'static str,
+    pub status: String,
+    pub service: String,
+    pub version: String,
 }

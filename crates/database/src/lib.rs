@@ -1,5 +1,5 @@
 use anyhow::Context;
-use objexel_common::{Camera, CameraStatus, CreateCamera};
+use objexel_common::{Camera, CameraStatus, CreateCamera, UpdateCamera};
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use uuid::Uuid;
 
@@ -55,6 +55,28 @@ impl Database {
         .await?;
         row.map(camera_from_row).transpose()
     }
+
+    pub async fn update_camera(&self, id: Uuid, input: UpdateCamera) -> anyhow::Result<Option<Camera>> {
+        let result = sqlx::query(
+            "UPDATE cameras SET name = COALESCE($2, name), rtsp_url = COALESCE($3, rtsp_url), enabled = COALESCE($4, enabled) WHERE id = $1",
+        )
+        .bind(id)
+        .bind(input.name)
+        .bind(input.rtsp_url)
+        .bind(input.enabled)
+        .execute(&self.pool)
+        .await?;
+        if result.rows_affected() == 0 { return Ok(None); }
+        self.get_camera(id).await
+    }
+
+    pub async fn delete_camera(&self, id: Uuid) -> anyhow::Result<bool> {
+        let result = sqlx::query("DELETE FROM cameras WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(result.rows_affected() == 1)
+    }
 }
 
 fn camera_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Camera> {
@@ -81,5 +103,12 @@ mod tests {
     #[test]
     fn unknown_status_is_safe() {
         assert_eq!(CameraStatus::default(), CameraStatus::Unknown);
+    }
+
+    #[test]
+    fn update_input_can_be_partial() {
+        let input = UpdateCamera { name: Some("Back yard".into()), rtsp_url: None, enabled: None };
+        assert_eq!(input.name.as_deref(), Some("Back yard"));
+        assert!(input.rtsp_url.is_none());
     }
 }

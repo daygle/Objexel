@@ -7,7 +7,7 @@ Phase 1 establishes a Rust workspace with clear service boundaries, a PostgreSQL
 - `common`: serializable domain types shared by services.
 - `database`: SQLx pool, embedded migrations, and camera persistence.
 - `camera`: camera lifecycle boundary; RTSP and FFmpeg adapters will be added later.
-- `api`: Axum HTTP boundary, readiness checks, camera endpoints, and a minimal OpenAPI document.
+- `api`: Axum HTTP boundary, readiness checks, complete camera CRUD endpoints, generated OpenAPI documentation, and the event WebSocket boundary.
 
 The API is intentionally stateless. PostgreSQL is the source of truth; future workers will communicate through Tokio channels and publish events over WebSockets without coupling media processing to HTTP handlers.
 
@@ -33,7 +33,7 @@ RTSP cameras -> camera worker -> detector/tracker workers -> event engine
 
 ## Roadmap
 
-- **Phase 2:** camera registry CRUD, RTSP health worker, FFmpeg snapshots, and SvelteKit shell.
+- **Phase 2:** RTSP health worker, FFmpeg snapshots, and SvelteKit shell.
 - **Phase 3:** ONNX Runtime detector with CPU/CUDA execution providers.
 - **Phase 4:** tracker, zones, event rules, and WebSocket events.
 - **Phase 5:** recordings, retention, notifications, authentication, and production deployment manifests.
