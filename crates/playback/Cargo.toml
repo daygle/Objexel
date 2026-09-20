@@ -1,0 +1,10 @@
+[package]
+name = "objexel-playback"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+objexel-common = { path = "../common" }
+tokio.workspace = true

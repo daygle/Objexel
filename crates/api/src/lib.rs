@@ -9,9 +9,11 @@ use axum::{
 use chrono::Utc;
 use objexel_actions::ActionDispatcher;
 use objexel_camera::{CameraManager, CameraService};
-use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, CameraTestResult, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, UpdateNotificationProvider, CreateZone, Detection, Event, HealthResponse, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Rule, StreamMetadata, Track, UpdateAction, UpdateCamera, UpdateRule, UpdateZone, Zone, ZoneEvent};
+use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, CameraTestResult, Clip, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, Detection, Event, HealthResponse, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, Snapshot, StreamMetadata, Track, UpdateAction, UpdateCamera, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent};
 use objexel_pipeline::ObservationPipeline;
 use objexel_models::ModelRegistry;
+use objexel_playback::PlaybackService;
+use objexel_recorder::Recorder;
 use objexel_zones::validate_polygon;
 use objexel_database::Database;
 use serde_json::{json, Value};
@@ -25,12 +27,14 @@ pub struct AppState {
     pub database: Option<Database>,
     pub camera_service: CameraService,
     pub pipeline: Option<ObservationPipeline>,
+    pub recorder: Recorder,
+    pub playback: PlaybackService,
 }
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, list_templates, create_template, test_notification, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
-    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
+    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, list_templates, create_template, test_notification, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
+    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Recording, Clip, Snapshot, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
     tags((name = "cameras", description = "Camera management and RTSP ingestion"))
 )]
 pub struct ApiDoc;
@@ -70,6 +74,15 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notification-providers/:id", axum::routing::put(update_provider))
         .route("/api/notification-templates", get(list_templates).post(create_template))
         .route("/api/test-notification", axum::routing::post(test_notification))
+        .route("/api/recordings", get(list_recordings))
+        .route("/api/recordings/:id", get(get_recording))
+        .route("/api/clips", get(list_clips))
+        .route("/api/clips/:id", get(get_clip))
+        .route("/api/clips/:id/media", get(clip_media))
+        .route("/api/clips/:id/download", axum::routing::post(download_clip))
+        .route("/api/snapshots", get(list_snapshots))
+        .route("/api/snapshots/:id", get(get_snapshot))
+        .route("/api/snapshots/:id/media", get(snapshot_media))
         .route("/api/detections", get(list_detections))
         .route("/api/detections/:id", get(get_detection))
         .route("/api/tracks", get(list_tracks))
@@ -275,6 +288,50 @@ async fn test_notification(State(state): State<Arc<AppState>>, Json(input): Json
     Ok(Json(json!({"status":"sent"})))
 }
 
+#[utoipa::path(get, path = "/api/recordings", tag = "recordings", responses((status = 200, body = [Recording]), (status = 503)))]
+async fn list_recordings(State(state): State<Arc<AppState>>, Query(query): Query<MediaQuery>) -> Result<Json<Vec<Recording>>, ErrorResponse> { database(&state)?.list_recordings(query.camera_id, query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/recordings/{id}", tag = "recordings", params(("id" = Uuid, Path)), responses((status = 200, body = Recording), (status = 404), (status = 503)))]
+async fn get_recording(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Recording>, ErrorResponse> { match database(&state)?.get_recording(id).await.map_err(internal_error)? { Some(item) => Ok(Json(item)), None => Err(not_found("recording not found")) } }
+
+#[utoipa::path(get, path = "/api/clips", tag = "recordings", responses((status = 200, body = [Clip]), (status = 503)))]
+async fn list_clips(State(state): State<Arc<AppState>>, Query(query): Query<MediaQuery>) -> Result<Json<Vec<Clip>>, ErrorResponse> { database(&state)?.list_clips(query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/clips/{id}", tag = "recordings", params(("id" = Uuid, Path)), responses((status = 200, body = Clip), (status = 404), (status = 503)))]
+async fn get_clip(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Clip>, ErrorResponse> { match database(&state)?.get_clip(id).await.map_err(internal_error)? { Some(item) => Ok(Json(item)), None => Err(not_found("clip not found")) } }
+
+#[utoipa::path(post, path = "/api/clips/{id}/download", tag = "recordings", params(("id" = Uuid, Path)), responses((status = 200), (status = 404), (status = 410)))]
+async fn download_clip(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Response, ErrorResponse> {
+    let clip = database(&state)?.get_clip(id).await.map_err(internal_error)?.ok_or_else(|| not_found("clip not found"))?;
+    media_response(&state.playback, &clip.clip_path, "attachment").await
+}
+
+#[utoipa::path(get, path = "/api/clips/{id}/media", tag = "recordings", params(("id" = Uuid, Path)), responses((status = 200), (status = 404), (status = 410)))]
+async fn clip_media(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Response, ErrorResponse> {
+    let clip = database(&state)?.get_clip(id).await.map_err(internal_error)?.ok_or_else(|| not_found("clip not found"))?;
+    media_response(&state.playback, &clip.clip_path, "inline").await
+}
+
+#[utoipa::path(get, path = "/api/snapshots", tag = "recordings", responses((status = 200, body = [Snapshot]), (status = 503)))]
+async fn list_snapshots(State(state): State<Arc<AppState>>, Query(query): Query<MediaQuery>) -> Result<Json<Vec<Snapshot>>, ErrorResponse> { database(&state)?.list_snapshots(query.camera_id, query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/snapshots/{id}", tag = "recordings", params(("id" = Uuid, Path)), responses((status = 200, body = Snapshot), (status = 404), (status = 503)))]
+async fn get_snapshot(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Snapshot>, ErrorResponse> { match database(&state)?.get_snapshot(id).await.map_err(internal_error)? { Some(item) => Ok(Json(item)), None => Err(not_found("snapshot not found")) } }
+
+#[utoipa::path(get, path = "/api/snapshots/{id}/media", tag = "recordings", params(("id" = Uuid, Path)), responses((status = 200), (status = 404), (status = 410)))]
+async fn snapshot_media(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Response, ErrorResponse> {
+    let snapshot = database(&state)?.get_snapshot(id).await.map_err(internal_error)?.ok_or_else(|| not_found("snapshot not found"))?;
+    media_response(&state.playback, &snapshot.image_path, "inline").await
+}
+
+async fn media_response(playback: &PlaybackService, path: &str, disposition: &str) -> Result<Response, ErrorResponse> {
+    let bytes = playback.read_file(path).await.map_err(|error| (StatusCode::GONE, Json(json!({"error": error.to_string()}))))?;
+    Response::builder().status(StatusCode::OK).header(header::CONTENT_TYPE, PlaybackService::content_type(path)).header(header::CONTENT_DISPOSITION, format!("{disposition}; filename=\"{}\"", std::path::Path::new(path).file_name().and_then(|name| name.to_str()).unwrap_or("media"))).body(Body::from(bytes)).map_err(|error| internal_error(anyhow::anyhow!(error)))
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct MediaQuery { camera_id: Option<Uuid>, limit: Option<i64> }
+
 #[utoipa::path(post, path = "/api/models/reload", tag = "models", responses((status = 200), (status = 400), (status = 503)))]
 async fn reload_models(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ErrorResponse> {
     let pipeline = state.pipeline.as_ref().ok_or_else(|| service_unavailable("inference pipeline is not configured"))?;
@@ -399,7 +456,7 @@ mod tests {
     use axum::{body::Body, http::{Request, StatusCode}};
     use tower::ServiceExt;
 
-    fn test_state() -> AppState { AppState { database: None, camera_service: CameraService::default(), pipeline: None } }
+    fn test_state() -> AppState { AppState { database: None, camera_service: CameraService::default(), pipeline: None, recorder: Recorder::default(), playback: PlaybackService::new("/var/lib/objexel") } }
 
     #[tokio::test]
     async fn health_endpoint_is_available() {

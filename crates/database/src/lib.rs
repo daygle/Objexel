@@ -1,5 +1,5 @@
 use anyhow::Context;
-use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, UpdateNotificationProvider, CreateRule, CreateZone, Detection, Event, EventSeverity, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Rule, RuleCondition, RuleConditionInput, Track, UpdateAction, UpdateCamera, UpdateRule, UpdateZone, Zone, ZoneEvent, ZoneEventType};
+use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, Clip, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, CreateZone, Detection, Event, EventSeverity, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, RuleCondition, RuleConditionInput, Snapshot, Track, UpdateAction, UpdateCamera, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent, ZoneEventType};
 use serde_json::Value;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use uuid::Uuid;
@@ -410,6 +410,57 @@ impl Database {
         row.map(template_from_row).transpose()
     }
 
+    pub async fn list_recordings(&self, camera_id: Option<Uuid>, limit: i64) -> anyhow::Result<Vec<Recording>> {
+        let rows = match camera_id {
+            Some(camera_id) => sqlx::query("SELECT id,camera_id,start_time,end_time,file_path,file_size,mode FROM recordings WHERE camera_id=$1 ORDER BY start_time DESC LIMIT $2").bind(camera_id).bind(limit.clamp(1,500)).fetch_all(&self.pool).await?,
+            None => sqlx::query("SELECT id,camera_id,start_time,end_time,file_path,file_size,mode FROM recordings ORDER BY start_time DESC LIMIT $1").bind(limit.clamp(1,500)).fetch_all(&self.pool).await?,
+        };
+        rows.into_iter().map(recording_from_row).collect()
+    }
+
+    pub async fn get_recording(&self, id: Uuid) -> anyhow::Result<Option<Recording>> {
+        let row = sqlx::query("SELECT id,camera_id,start_time,end_time,file_path,file_size,mode FROM recordings WHERE id=$1").bind(id).fetch_optional(&self.pool).await?;
+        row.map(recording_from_row).transpose()
+    }
+
+    pub async fn insert_recording(&self, recording: &Recording) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO recordings (id,camera_id,start_time,end_time,file_path,file_size,mode) VALUES ($1,$2,$3,$4,$5,$6,$7)").bind(recording.id).bind(recording.camera_id).bind(recording.start_time).bind(recording.end_time).bind(&recording.file_path).bind(recording.file_size).bind(&recording.mode).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn list_clips(&self, limit: i64) -> anyhow::Result<Vec<Clip>> {
+        let rows = sqlx::query("SELECT id,event_id,recording_id,clip_start,clip_end,clip_path FROM clips ORDER BY clip_start DESC LIMIT $1").bind(limit.clamp(1,500)).fetch_all(&self.pool).await?;
+        rows.into_iter().map(clip_from_row).collect()
+    }
+
+    pub async fn get_clip(&self, id: Uuid) -> anyhow::Result<Option<Clip>> {
+        let row = sqlx::query("SELECT id,event_id,recording_id,clip_start,clip_end,clip_path FROM clips WHERE id=$1").bind(id).fetch_optional(&self.pool).await?;
+        row.map(clip_from_row).transpose()
+    }
+
+    pub async fn insert_clip(&self, clip: &Clip) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO clips (id,event_id,recording_id,clip_start,clip_end,clip_path) VALUES ($1,$2,$3,$4,$5,$6)").bind(clip.id).bind(clip.event_id).bind(clip.recording_id).bind(clip.clip_start).bind(clip.clip_end).bind(&clip.clip_path).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn list_snapshots(&self, camera_id: Option<Uuid>, limit: i64) -> anyhow::Result<Vec<Snapshot>> {
+        let rows = match camera_id {
+            Some(camera_id) => sqlx::query("SELECT id,event_id,camera_id,image_path,timestamp FROM snapshots WHERE camera_id=$1 ORDER BY timestamp DESC LIMIT $2").bind(camera_id).bind(limit.clamp(1,500)).fetch_all(&self.pool).await?,
+            None => sqlx::query("SELECT id,event_id,camera_id,image_path,timestamp FROM snapshots ORDER BY timestamp DESC LIMIT $1").bind(limit.clamp(1,500)).fetch_all(&self.pool).await?,
+        };
+        rows.into_iter().map(snapshot_from_row).collect()
+    }
+
+    pub async fn get_snapshot(&self, id: Uuid) -> anyhow::Result<Option<Snapshot>> {
+        let row = sqlx::query("SELECT id,event_id,camera_id,image_path,timestamp FROM snapshots WHERE id=$1").bind(id).fetch_optional(&self.pool).await?;
+        row.map(snapshot_from_row).transpose()
+    }
+
+    pub async fn insert_snapshot(&self, snapshot: &Snapshot) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO snapshots (id,event_id,camera_id,image_path,timestamp) VALUES ($1,$2,$3,$4,$5)").bind(snapshot.id).bind(snapshot.event_id).bind(snapshot.camera_id).bind(&snapshot.image_path).bind(snapshot.timestamp).execute(&self.pool).await?;
+        Ok(())
+    }
+
     pub async fn delete_camera(&self, id: Uuid) -> anyhow::Result<bool> {
         let result = sqlx::query("DELETE FROM cameras WHERE id = $1")
             .bind(id)
@@ -475,6 +526,10 @@ fn condition_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<RuleConditio
 fn severity_string(severity: &EventSeverity) -> &'static str { match severity { EventSeverity::Info => "info", EventSeverity::Warning => "warning", EventSeverity::Critical => "critical" } }
 fn severity_from_string(value: &str) -> EventSeverity { match value { "warning" => EventSeverity::Warning, "critical" => EventSeverity::Critical, _ => EventSeverity::Info } }
 fn event_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Event> { Ok(Event { id: row.try_get("id")?, rule_id: row.try_get::<Option<Uuid>, _>("rule_id")?.unwrap_or_else(Uuid::nil), camera_id: row.try_get("camera_id")?, track_id: row.try_get("track_id")?, observation_id: row.try_get("observation_id")?, event_type: row.try_get("event_type")?, summary: row.try_get("summary")?, severity: severity_from_string(&row.try_get::<String,_>("severity")?), created_at: row.try_get("created_at")? }) }
+
+fn recording_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Recording> { Ok(Recording { id: row.try_get("id")?, camera_id: row.try_get("camera_id")?, start_time: row.try_get("start_time")?, end_time: row.try_get("end_time")?, file_path: row.try_get("file_path")?, file_size: row.try_get("file_size")?, mode: row.try_get("mode")? }) }
+fn clip_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Clip> { Ok(Clip { id: row.try_get("id")?, event_id: row.try_get("event_id")?, recording_id: row.try_get("recording_id")?, clip_start: row.try_get("clip_start")?, clip_end: row.try_get("clip_end")?, clip_path: row.try_get("clip_path")? }) }
+fn snapshot_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Snapshot> { Ok(Snapshot { id: row.try_get("id")?, event_id: row.try_get("event_id")?, camera_id: row.try_get("camera_id")?, image_path: row.try_get("image_path")?, timestamp: row.try_get("timestamp")? }) }
 
 fn provider_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<NotificationProvider> { Ok(NotificationProvider { id: row.try_get("id")?, provider_type: row.try_get("type")?, enabled: row.try_get("enabled")?, configuration: row.try_get("configuration")?, created_at: row.try_get("created_at")? }) }
 fn template_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<NotificationTemplate> { Ok(NotificationTemplate { id: row.try_get("id")?, name: row.try_get("name")?, subject: row.try_get("subject")?, body: row.try_get("body")?, html: row.try_get("html")?, created_at: row.try_get("created_at")? }) }

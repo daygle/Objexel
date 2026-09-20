@@ -13,6 +13,8 @@ members = [
     "crates/models",
     "crates/notifications",
     "crates/actions",
+    "crates/recorder",
+    "crates/playback",
     "crates/api",
 ]
 

@@ -391,6 +391,36 @@ pub struct CreateNotificationTemplate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Recording {
+    pub id: Uuid,
+    pub camera_id: Uuid,
+    pub start_time: DateTime<Utc>,
+    pub end_time: Option<DateTime<Utc>>,
+    pub file_path: String,
+    pub file_size: Option<i64>,
+    pub mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Clip {
+    pub id: Uuid,
+    pub event_id: Option<Uuid>,
+    pub recording_id: Option<Uuid>,
+    pub clip_start: DateTime<Utc>,
+    pub clip_end: DateTime<Utc>,
+    pub clip_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Snapshot {
+    pub id: Uuid,
+    pub event_id: Option<Uuid>,
+    pub camera_id: Uuid,
+    pub image_path: String,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct HealthResponse {
     pub status: String,
     pub service: String,

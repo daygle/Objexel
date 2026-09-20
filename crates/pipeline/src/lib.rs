@@ -4,6 +4,7 @@ use objexel_common::{Detection, Event, Observation, Track, ZoneEventType};
 use objexel_database::Database;
 use objexel_detector::{FrameTensor, ModelManager};
 use objexel_observations::ObservationEngine;
+use objexel_recorder::Recorder;
 use objexel_rules::{ObservationContext, RuleEngine};
 use objexel_tracker::Tracker;
 use objexel_zones::ZoneEvaluator;
@@ -19,11 +20,12 @@ pub struct ObservationPipeline {
     actions: ActionDispatcher,
     observations: ObservationEngine,
     database: Database,
+    recorder: Recorder,
 }
 
 impl ObservationPipeline {
-    pub fn new(database: Database) -> Self {
-        Self { models: ModelManager::default(), tracker: Arc::new(Mutex::new(Tracker::default())), zones: Arc::new(Mutex::new(ZoneEvaluator::default())), rules: Arc::new(Mutex::new(RuleEngine::default())), actions: ActionDispatcher::new(), observations: ObservationEngine::default(), database }
+    pub fn new(database: Database, recorder: Recorder) -> Self {
+        Self { models: ModelManager::default(), tracker: Arc::new(Mutex::new(Tracker::default())), zones: Arc::new(Mutex::new(ZoneEvaluator::default())), rules: Arc::new(Mutex::new(RuleEngine::default())), actions: ActionDispatcher::new(), observations: ObservationEngine::default(), database, recorder }
     }
 
     pub async fn process_frame(&self, frame: FrameTensor) -> Result<PipelineResult> {
@@ -60,6 +62,24 @@ impl ObservationPipeline {
             for event in rule_engine.evaluate(&rules, context, now) {
                 self.database.insert_event(&event).await?;
                 self.database.insert_notification(&event).await?;
+                if let Some(camera) = self.database.get_camera(event.camera_id).await? {
+                    let recorder = self.recorder.clone();
+                    let database = self.database.clone();
+                    let event_id = event.id;
+                    let camera_id = event.camera_id;
+                    let rtsp_url = camera.rtsp_url;
+                    let event_time = event.created_at;
+                    tokio::spawn(async move {
+                        match recorder.create_event_clip(camera_id, event_id, &rtsp_url, event_time).await {
+                            Ok(clip) => if let Err(error) = database.insert_clip(&clip).await { tracing::warn!(event_id = %event_id, %error, "event clip metadata insert failed"); },
+                            Err(error) => tracing::warn!(event_id = %event_id, %error, "event clip generation failed"),
+                        }
+                        match recorder.create_snapshot(camera_id, Some(event_id), &rtsp_url, event_time).await {
+                            Ok(snapshot) => if let Err(error) = database.insert_snapshot(&snapshot).await { tracing::warn!(event_id = %event_id, %error, "event snapshot metadata insert failed"); },
+                            Err(error) => tracing::warn!(event_id = %event_id, %error, "event snapshot generation failed"),
+                        }
+                    });
+                }
                 let actions = self.database.actions_for_rule(event.rule_id).await?;
                 for action in actions {
                     let provider = match action.provider_id { Some(id) => self.database.provider(id).await?, None => None };

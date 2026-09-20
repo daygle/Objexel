@@ -1,6 +1,8 @@
 use objexel_api::{router, AppState};
 use objexel_camera::CameraService;
 use objexel_pipeline::ObservationPipeline;
+use objexel_playback::PlaybackService;
+use objexel_recorder::{Recorder, RecorderConfig};
 use objexel_models::ModelRegistry;
 use objexel_database::Database;
 use std::env;
@@ -20,11 +22,31 @@ async fn main() -> anyhow::Result<()> {
             None
         }
     };
+    let storage_root = env::var("OBJEXEL_STORAGE_DIR").unwrap_or_else(|_| "/var/lib/objexel".into());
+    let recorder = Recorder::new(RecorderConfig { storage_root: storage_root.clone().into(), ..RecorderConfig::default() });
+    let playback = PlaybackService::new(storage_root);
+    let cleanup_recorder = recorder.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(6 * 60 * 60));
+        loop {
+            interval.tick().await;
+            if let Err(error) = cleanup_recorder.cleanup_paths(chrono::Utc::now()).await { tracing::warn!(%error, "recording retention cleanup failed"); }
+        }
+    });
     let camera_service = CameraService::default();
     if let Some(database) = &database {
         for camera in database.list_cameras().await? {
             if camera.enabled {
                 let health_database = database.clone();
+                let recording_camera = camera.clone();
+                let recording_service = recorder.clone();
+                match recording_service.start_continuous(recording_camera.id, &recording_camera.rtsp_url).await {
+                    Ok((recording, mut child)) => {
+                        if let Err(error) = database.insert_recording(&recording).await { tracing::warn!(%error, "could not persist recording metadata"); }
+                        tokio::spawn(async move { let _ = child.wait().await; });
+                    }
+                    Err(error) => tracing::warn!(camera_id = %recording_camera.id, %error, "continuous recording could not start"),
+                }
                 camera_service.spawn_monitor(camera, move |result| {
                     let health_database = health_database.clone();
                     async move {
@@ -43,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-    let pipeline = database.as_ref().map(|database| ObservationPipeline::new(database.clone()));
+    let pipeline = database.as_ref().map(|database| ObservationPipeline::new(database.clone(), recorder.clone()));
     if let Some(pipeline) = &pipeline {
         let model_root = env::var("OBJEXEL_MODEL_DIR").unwrap_or_else(|_| "/models".into());
         let registry = ModelRegistry::new(model_root, pipeline.models.clone());
@@ -81,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-    let app = router(AppState { database, camera_service, pipeline });
+    let app = router(AppState { database, camera_service, pipeline, recorder, playback });
     let address = env::var("OBJEXEL_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into());
     let listener = TcpListener::bind(&address).await?;
     tracing::info!(%address, "Objexel API listening");

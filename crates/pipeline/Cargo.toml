@@ -10,6 +10,7 @@ objexel-actions = { path = "../actions" }
 chrono.workspace = true
 objexel-common = { path = "../common" }
 objexel-database = { path = "../database" }
+objexel-recorder = { path = "../recorder" }
 objexel-detector = { path = "../detector" }
 objexel-observations = { path = "../observations" }
 objexel-rules = { path = "../rules" }
