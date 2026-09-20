@@ -878,11 +878,11 @@ async fn events_socket(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>)
     let mut receiver = state.events.subscribe();
     ws.on_upgrade(move |mut socket| async move {
         tracing::debug!("live event websocket connected");
-        if socket.send(Message::Text("{\"kind\":\"connected\"}".to_string())).await.is_err() { return; }
+        if socket.send(Message::Text("{\"kind\":\"connected\"}".to_string().into())).await.is_err() { return; }
         loop {
             tokio::select! {
                 broadcasted = receiver.recv() => match broadcasted {
-                    Ok(payload) => { if socket.send(Message::Text(payload)).await.is_err() { break; } }
+                    Ok(payload) => { if socket.send(Message::Text(payload.into())).await.is_err() { break; } }
                     Err(broadcast::error::RecvError::Lagged(skipped)) => { tracing::debug!(skipped, "live event subscriber lagged"); }
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
