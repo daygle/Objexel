@@ -4,7 +4,11 @@ use ndarray::{ArrayD, IxDyn};
 use objexel_common::{BoundingBox, Detection};
 use ort::{ep, session::Session, value::TensorRef};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, Mutex}};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex},
+};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,7 +38,15 @@ pub struct FrameTensor {
 
 struct LoadedModel {
     config: ModelConfig,
-    session: Mutex<Session>,
+    sessions: Vec<Mutex<Session>>,
+    next_session: AtomicUsize,
+}
+
+impl LoadedModel {
+    fn next_session(&self) -> &Mutex<Session> {
+        let index = self.next_session.fetch_add(1, Ordering::Relaxed) % self.sessions.len();
+        &self.sessions[index]
+    }
 }
 
 #[derive(Clone, Default)]
@@ -49,24 +61,15 @@ impl ModelManager {
         // Build the session in a scope that ends before any await: ort's
         // SessionBuilder is neither Send nor Sync, so it must not be held
         // across the map lock below.
+        let pool_size = inference_pool_size();
         let loaded = {
-            let mut builder = Session::builder().context("create ONNX Runtime session builder")?;
-            // Prefer CUDA when compiled with the cuda feature, while retaining the built-in
-            // CPU provider as a portable fallback for N100 and other CPU-only hosts. A failed
-            // provider configuration recovers the builder so the session still loads with defaults.
-            #[cfg(feature = "cuda")]
-            let providers = [ep::CUDA::default().build(), ep::CPU::default().build()];
-            #[cfg(not(feature = "cuda"))]
-            let providers = [ep::CPU::default().build()];
-            builder = match builder.with_execution_providers(providers) {
-                Ok(builder) => builder,
-                Err(error) => {
-                    tracing::warn!(error = %error.message(), "failed to configure ONNX execution providers; using runtime defaults");
-                    error.recover()
-                }
-            };
-            let session = builder.commit_from_file(&config.path).with_context(|| format!("load ONNX model {}", config.path.display()))?;
-            Arc::new(LoadedModel { config: config.clone(), session: Mutex::new(session) })
+            let sessions = (0..pool_size)
+                .map(|_| build_session(&config))
+                .collect::<Result<Vec<_>>>()?
+                .into_iter()
+                .map(Mutex::new)
+                .collect();
+            Arc::new(LoadedModel { config: config.clone(), sessions, next_session: AtomicUsize::new(0) })
         };
         self.models.write().await.insert(config.id, loaded);
         let mut active = self.active.write().await;
@@ -116,7 +119,7 @@ impl ModelManager {
         let model = self.active_model(model_id).await?;
         let config = model.config.clone();
         let input = ArrayD::from_shape_vec(IxDyn(&frame.shape), frame.data).context("invalid detector tensor shape")?;
-        let mut session = model.session.lock().map_err(|_| anyhow::anyhow!("ONNX session lock poisoned"))?;
+        let mut session = model.next_session().lock().map_err(|_| anyhow::anyhow!("ONNX session lock poisoned"))?;
         let outputs = session.run(ort::inputs![TensorRef::from_array_view(input.view())?]).context("run ONNX inference")?;
         if outputs.len() == 0 { bail!("ONNX model returned no outputs"); }
         let (_, values) = outputs[0].try_extract_tensor::<f32>().context("decode ONNX output tensor")?;
@@ -134,6 +137,33 @@ impl ModelManager {
         }
         Ok(detections)
     }
+}
+
+fn inference_pool_size() -> usize {
+    std::env::var("OBJEXEL_INFERENCE_SESSIONS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .map(|value| value.clamp(1, 16))
+        .unwrap_or(2)
+}
+
+fn build_session(config: &ModelConfig) -> Result<Session> {
+    let mut builder = Session::builder().context("create ONNX Runtime session builder")?;
+    // Prefer CUDA when compiled with the cuda feature, while retaining the built-in
+    // CPU provider as a portable fallback. A failed provider configuration recovers
+    // the builder so the session still loads with defaults.
+    #[cfg(feature = "cuda")]
+    let providers = [ep::CUDA::default().build(), ep::CPU::default().build()];
+    #[cfg(not(feature = "cuda"))]
+    let providers = [ep::CPU::default().build()];
+    builder = match builder.with_execution_providers(providers) {
+        Ok(builder) => builder,
+        Err(error) => {
+            tracing::warn!(error = %error.message(), "failed to configure ONNX execution providers; using runtime defaults");
+            error.recover()
+        }
+    };
+    builder.commit_from_file(&config.path).with_context(|| format!("load ONNX model {}", config.path.display()))
 }
 
 fn validate_model_config(config: &ModelConfig) -> Result<()> {
@@ -157,5 +187,10 @@ mod tests {
     fn model_validation_requires_onnx_extension() {
         let config = ModelConfig { id: Uuid::new_v4(), name: "test".into(), version: "1".into(), model_type: "yolo".into(), path: "model.bin".into(), input_width: 640, input_height: 640, labels: vec![], confidence_threshold: 0.5 };
         assert!(validate_model_config(&config).is_err());
+    }
+
+    #[test]
+    fn inference_pool_size_is_bounded_and_configurable() {
+        assert!((1..=16).contains(&inference_pool_size()));
     }
 }

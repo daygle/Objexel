@@ -36,6 +36,7 @@ Catalog metadata supplies the ONNX input dimensions and class labels used by the
 - **Enable** makes a registered model eligible for loading.
 - **Activate** selects one enabled model as the default detector.
 - **Reload sessions** loads all enabled registered models from `OBJEXEL_MODEL_DIR`.
+- Each loaded model has a bounded ONNX session pool so cameras sharing a model can infer concurrently. Set `OBJEXEL_INFERENCE_SESSIONS` to a value from 1 to 16; the default is 2 sessions per model. Increase it only when memory and accelerator capacity allow.
 - Disabling a model clears its default status but does not delete its file.
 
 Model files should be kept on persistent storage and backed up with the application configuration. Do not delete a model file while it is active.
