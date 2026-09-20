@@ -8,6 +8,7 @@ use objexel_models::ModelRegistry;
 use objexel_database::Database;
 use std::env;
 use tokio::net::TcpListener;
+use tower_http::services::{ServeDir, ServeFile};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -151,6 +152,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let app = router(AppState { database, camera_service, pipeline, recorder, playback });
+    let web_dir = env::var("OBJEXEL_WEB_DIR").unwrap_or_else(|_| "/usr/local/share/objexel/web".into());
+    let app = app.fallback_service(ServeDir::new(&web_dir).not_found_service(ServeFile::new(format!("{web_dir}/index.html"))));
     let address = env::var("OBJEXEL_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into());
     let listener = TcpListener::bind(&address).await?;
     tracing::info!(%address, "Objexel API listening");

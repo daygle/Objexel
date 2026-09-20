@@ -28,7 +28,7 @@ docker compose up -d --build
 curl -fsS http://localhost:8080/liveness
 ```
 
-The Compose file starts PostgreSQL, waits for its health check, applies SQLx migrations, and starts the API. The generated `.env` keeps PostgreSQL off the host network and enables secure cookies for HTTPS deployments. If TLS is terminated elsewhere, keep the API on a private network and preserve `OBJEXEL_COOKIE_SECURE=1`.
+The Compose file starts PostgreSQL, waits for its health check, applies SQLx migrations, and starts the API. The API container also serves the built web UI and its static assets on port 8080. The generated `.env` keeps PostgreSQL off the host network and enables secure cookies for HTTPS deployments. If TLS is terminated elsewhere, keep the API on a private network and preserve `OBJEXEL_COOKIE_SECURE=1`. **If you are not terminating TLS and publish the API directly on plain HTTP, set `OBJEXEL_COOKIE_SECURE=0` in `.env`, or browsers will refuse to store the session cookie and you will be stuck on `/login`/`/setup` with `authentication required` errors.**
 
 ## First run
 
