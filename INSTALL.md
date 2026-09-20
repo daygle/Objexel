@@ -16,7 +16,11 @@ curl -fsSL https://get.docker.com | sudo sh
 sudo usermod -aG docker "$USER"
 mkdir -p /opt/objexel
 cd /opt/objexel
-git clone https://github.com/daygle/Objexel.git .
+if [ -d .git ]; then
+  git pull --autostash
+else
+  git clone https://github.com/daygle/Objexel.git .
+fi
 mkdir -p config models recordings clips snapshots backups
 sudo chown -R "$USER":"$USER" /opt/objexel
 printf 'POSTGRES_PASSWORD=%s\nOBJEXEL_COOKIE_SECURE=1\n' "$(openssl rand -hex 24)" > .env
