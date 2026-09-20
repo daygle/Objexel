@@ -2,7 +2,11 @@
 
 Self-hosted, Linux-first AI camera analytics for home servers and Proxmox. Objexel is being built incrementally as a Rust backend with a SvelteKit frontend, ONNX Runtime inference, RTSP/FFmpeg media handling, and PostgreSQL persistence.
 
-## Phase 1
+## Phase 3
+
+The backend now includes Tokio-based RTSP ingestion through `ffprobe` and `ffmpeg`, camera health monitoring with reconnect backoff, stream metadata probing, JPEG snapshots, persisted health fields, and generated OpenAPI documentation. AI detection is intentionally deferred to the next phase.
+
+## API
 
 This repository currently contains the production-oriented foundation:
 
@@ -25,12 +29,17 @@ The API listens on `0.0.0.0:8080` by default. `GET /health` does not require a d
 
 - `GET /health`
 - `GET /ready`
-- `GET /api/v1/cameras`
-- `POST /api/v1/cameras`
-- `GET /api/v1/cameras/:id`
-- `PATCH /api/v1/cameras/:id`
-- `DELETE /api/v1/cameras/:id`
-- `GET /api/v1/openapi.json` (generated with `utoipa`)
+- `GET /api/cameras`
+- `POST /api/cameras`
+- `GET /api/cameras/:id`
+- `PUT /api/cameras/:id`
+- `DELETE /api/cameras/:id`
+- `POST /api/cameras/:id/test`
+- `POST /api/cameras/:id/snapshot`
+- `GET /api/cameras/:id/status`
+- `GET /api/openapi.json` (generated with `utoipa`)
+
+The `/api/v1/cameras` routes remain available as compatibility aliases.
 
 Run checks with:
 
