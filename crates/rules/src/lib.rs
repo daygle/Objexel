@@ -24,7 +24,8 @@ pub struct RuleEngine {
 
 impl RuleEngine {
     pub fn evaluate(&mut self, rules: &[Rule], context: ObservationContext<'_>, now: DateTime<Utc>) -> Vec<Event> {
-        rules.iter().filter(|rule| rule.enabled && self.matches(rule, &context) && self.available(rule, now)).map(|rule| {
+        let matched: Vec<&Rule> = rules.iter().filter(|rule| rule.enabled && self.matches(rule, &context) && self.available(rule, now)).collect();
+        matched.into_iter().map(|rule| {
             self.last_emitted.insert(rule.id, now);
             Event { id: Uuid::new_v4(), rule_id: rule.id, camera_id: context.observation.camera_id, track_id: Some(context.observation.track_id), observation_id: Some(context.observation.id), event_type: context.observation.observation_type.clone(), summary: format!("{}: {}", rule.name, context.observation.summary), severity: rule.severity.clone(), created_at: now }
         }).collect()
@@ -65,5 +66,5 @@ mod tests {
     }
 
     #[test]
-    fn unused_input_type_is_constructible() { let _ = RuleConditionInput { object_class: None, zone_id: None, observation_type: None, behaviour_type: None, identity_id: None, familiarity: None, confidence_threshold: None, minimum_duration_ms: None }; }
+    fn unused_input_type_is_constructible() { let _ = RuleConditionInput { object_class: None, zone_id: None, observation_type: None, behaviour_type: None, identity_id: None, familiarity: None, confidence_threshold: None, minimum_duration_ms: None, minimum_priority: None, minimum_anomaly_score: None }; }
 }

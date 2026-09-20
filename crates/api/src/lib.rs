@@ -13,7 +13,7 @@ use objexel_auth::{digest_token, generate_csrf_token, generate_token, hash_passw
 use objexel_analytics::AnalyticsSummary;
 use objexel_common::{AnomalyEvent, Behaviour, BehaviourScore, CreateModelAssignment, IdentityScore, FusionResult, Identity, IdentityObservation, IdentityStatistics, IntelligenceSummary, ModelAssignment, ModelCatalogEntry, ModelDownload, UpdateIdentity, UpdateInfo, UpdateModelEnabled};
 use objexel_camera::{CameraManager, CameraService};
-use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, CameraTestResult, Clip, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, Detection, Event, HealthResponse, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, Snapshot, StreamMetadata, Track, UpdateAction, UpdateCamera, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent};
+use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, CameraTestResult, Clip, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, CreateZone, Detection, Event, HealthResponse, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, Snapshot, StreamMetadata, Track, UpdateAction, UpdateCamera, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent};
 use objexel_pipeline::ObservationPipeline;
 use objexel_models::ModelRegistry;
 use objexel_playback::PlaybackService;

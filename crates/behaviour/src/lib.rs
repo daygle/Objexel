@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
-use objexel_common::{Behaviour, Track};
+pub use objexel_common::Behaviour;
+use objexel_common::Track;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

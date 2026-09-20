@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy)]
 pub enum InferenceProfile { Fast, Balanced, Accurate }
-impl InferenceProfile { pub fn confidence_threshold(self) -> f32 { match self { Self::Fast => .40, Self::Balanced => .25, Self::Accurate => .15 } } }
+impl InferenceProfile { pub fn confidence_threshold(self) -> f32 { match self { Self::Fast => 0.40, Self::Balanced => 0.25, Self::Accurate => 0.15 } } }
 
 #[derive(Clone)]
 pub struct ModelRegistry { pub model_manager: ModelManager, pub root: PathBuf }
@@ -21,17 +21,17 @@ impl ModelRegistry {
             let path = self.root.join(directory); if !path.is_dir() { continue; }
             for entry in fs::read_dir(&path).with_context(|| format!("scan {}", path.display()))? {
                 let file = entry?.path(); if file.extension().and_then(|v| v.to_str()) != Some("onnx") { continue; }
-                configs.push(ModelConfig { id: Uuid::new_v4(), name: file.file_stem().and_then(|v| v.to_str()).unwrap_or(directory).into(), version: "discovered".into(), model_type: model_type.into(), path: file, input_width: 640, input_height: 640, labels: Vec::new(), confidence_threshold: .25 });
+                configs.push(ModelConfig { id: Uuid::new_v4(), name: file.file_stem().and_then(|v| v.to_str()).unwrap_or(directory).into(), version: "discovered".into(), model_type: model_type.into(), path: file, input_width: 640, input_height: 640, labels: Vec::new(), confidence_threshold: 0.25 });
             }
         } Ok(configs)
     }
     pub async fn load_all(&self) -> Result<usize> { let n = self.load_configs(self.discover().await?).await?; tracing::info!(loaded=n, root=%self.root.display(), "model discovery complete"); Ok(n) }
     pub async fn load_registered(&self, models: &[Model]) -> Result<usize> {
-        self.load_configs(models.iter().filter(|m| m.enabled).map(|m| ModelConfig { id:m.id,name:m.name.clone(),version:m.version.clone(),model_type:m.model_type.clone(),path:m.path.clone().into(),input_width:m.input_width,input_height:m.input_height,labels:m.class_list.clone(),confidence_threshold:.25 }).collect()).await
+        self.load_configs(models.iter().filter(|m| m.enabled).map(|m| ModelConfig { id:m.id,name:m.name.clone(),version:m.version.clone(),model_type:m.model_type.clone(),path:m.path.clone().into(),input_width:m.input_width,input_height:m.input_height,labels:m.class_list.clone(),confidence_threshold:0.25 }).collect()).await
     }
     async fn load_configs(&self, configs: Vec<ModelConfig>) -> Result<usize> { let mut n=0; for c in configs { self.model_manager.load(c).await?; n+=1; } Ok(n) }
     pub async fn validate(path: &Path, width: u32, height: u32) -> Result<()> { if path.extension().and_then(|v|v.to_str()) != Some("onnx") { bail!("model must use the ONNX format"); } if !path.is_file() { bail!("model file does not exist: {}",path.display()); } if width==0 || height==0 { bail!("model input dimensions must be positive"); } Ok(()) }
-    pub async fn benchmark(&self, model: &Model, iterations: u32) -> Result<BenchmarkResult> { let iterations=iterations.max(1); let config=self.model_manager.model_config(model.id).await.context("model is not loaded")?; let start=Instant::now(); for _ in 0..iterations { self.model_manager.benchmark_once(model.id,config.input_width,config.input_height).await?; } let elapsed=start.elapsed().as_secs_f32().max(.000001); Ok(BenchmarkResult{id:Uuid::new_v4(),model_id:model.id,fps:iterations as f32/elapsed,average_inference_time_ms:elapsed*1000./iterations as f32,gpu_memory_usage_mb:None,cpu_usage_percent:None,test_timestamp:Utc::now()}) }
+    pub async fn benchmark(&self, model: &Model, iterations: u32) -> Result<BenchmarkResult> { let iterations=iterations.max(1); let config=self.model_manager.model_config(model.id).await.context("model is not loaded")?; let start=Instant::now(); for _ in 0..iterations { self.model_manager.benchmark_once(model.id,config.input_width,config.input_height).await?; } let elapsed=start.elapsed().as_secs_f32().max(0.000001); Ok(BenchmarkResult{id:Uuid::new_v4(),model_id:model.id,fps:iterations as f32/elapsed,average_inference_time_ms:elapsed*1000./iterations as f32,gpu_memory_usage_mb:None,cpu_usage_percent:None,test_timestamp:Utc::now()}) }
 
     pub async fn download_catalog_entry(&self, entry: &ModelCatalogEntry) -> Result<PathBuf> {
         self.download_catalog_entry_with_progress(entry, |_progress, _bytes, _total| {}).await
@@ -70,5 +70,5 @@ fn safe_name(value:&str)->String { value.chars().map(|c| if c.is_ascii_alphanume
 fn find_onnx(root:&Path)->Result<PathBuf>{ for e in walk(root)? { if e.extension().and_then(|v|v.to_str())==Some("onnx"){return Ok(e)} } bail!("archive did not contain an ONNX model") }
 fn walk(root:&Path)->Result<Vec<PathBuf>>{ let mut out=Vec::new(); for e in fs::read_dir(root)? { let p=e?.path(); if p.is_dir(){out.extend(walk(&p)?)}else{out.push(p)} } Ok(out) }
 fn extract_tar<R:std::io::Read>(reader:R, target:&Path)->Result<()> { let mut archive=tar::Archive::new(reader); for item in archive.entries()? { let mut item=item?; let path=item.path()?.into_owned(); if path.components().any(|c|matches!(c,std::path::Component::ParentDir)){bail!("archive contains unsafe path")} item.unpack(target.join(path))?; } Ok(()) }
-pub fn model_config_from_create(id:Uuid,input:CreateModel)->ModelConfig{ModelConfig{id,name:input.name,version:input.version,model_type:input.model_type,path:input.path.into(),input_width:input.input_width,input_height:input.input_height,labels:input.class_list,confidence_threshold:.25}}
+pub fn model_config_from_create(id:Uuid,input:CreateModel)->ModelConfig{ModelConfig{id,name:input.name,version:input.version,model_type:input.model_type,path:input.path.into(),input_width:input.input_width,input_height:input.input_height,labels:input.class_list,confidence_threshold:0.25}}
 #[cfg(test)] mod tests { use super::*; #[test] fn profiles_are_ordered(){assert!(InferenceProfile::Fast.confidence_threshold()>InferenceProfile::Accurate.confidence_threshold())} #[test] fn safe_names_remove_separators(){assert_eq!(safe_name("../../x"),".._.._x")} }

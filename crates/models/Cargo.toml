@@ -8,6 +8,7 @@ license.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 flate2.workspace = true
+hex.workspace = true
 objexel-common = { path = "../common" }
 objexel-detector = { path = "../detector" }
 serde.workspace = true

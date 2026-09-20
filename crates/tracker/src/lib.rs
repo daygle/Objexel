@@ -26,7 +26,7 @@ impl Tracker {
         let mut used = HashMap::new();
         for detection in detections.iter_mut() {
             let candidate = self.tracks.iter()
-                .filter(|(id, track)| !used.contains_key(id) && track.object_class == detection.object_class && now - track.last_seen <= self.config.max_age)
+                .filter(|(id, track)| !used.contains_key(*id) && track.object_class == detection.object_class && now - track.last_seen <= self.config.max_age)
                 .max_by(|(_, left), (_, right)| {
                     let left_iou = iou(left.movement_path.last().unwrap_or(&detection.bounding_box), &detection.bounding_box);
                     let right_iou = iou(right.movement_path.last().unwrap_or(&detection.bounding_box), &detection.bounding_box);

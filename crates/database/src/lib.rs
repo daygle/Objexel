@@ -2,9 +2,8 @@ use anyhow::Context;
 use objexel_auth::{Role, SessionUser, User};
 use objexel_analytics::{AnalyticsMetric, AnalyticsSnapshot, AnalyticsSummary};
 use objexel_adaptive::AdaptiveAssessment;
-use objexel_behaviour::Behaviour;
 use objexel_identity::{familiarity, new_identity, score, similarity, signature, ObjectSignature};
-use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, Clip, CreateAction, CreateCamera, CreateModel, CreateModelAssignment, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, CreateZone, Detection, Event, EventSeverity, FusionResult, Identity, IdentityObservation, IdentityStatistics, Model, ModelAssignment, ModelCatalogEntry, ModelDownload, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, RuleCondition, RuleConditionInput, Snapshot, Track, UpdateAction, UpdateCamera, UpdateIdentity, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent, ZoneEventType};
+use objexel_common::{Action, ActionExecution, Behaviour, BenchmarkResult, Camera, CameraStatus, Clip, CreateAction, CreateCamera, CreateModel, CreateModelAssignment, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, CreateZone, Detection, Event, EventSeverity, FusionResult, Identity, IdentityObservation, IdentityStatistics, Model, ModelAssignment, ModelCatalogEntry, ModelDownload, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, RuleCondition, RuleConditionInput, Snapshot, Track, UpdateAction, UpdateCamera, UpdateIdentity, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent, ZoneEventType};
 use objexel_search::{SearchFilters, SearchResult};
 use objexel_common::UpdateInfo;
 use serde_json::Value;
@@ -78,7 +77,7 @@ impl Database {
 
     pub async fn get_user_credentials(&self, username: &str) -> anyhow::Result<Option<(User, String)>> {
         sqlx::query("SELECT id, username, email, role, enabled, created_at, password_hash FROM users WHERE username = $1")
-            .bind(username).fetch_optional(&self.pool).await?.map(|row| Ok((user_from_row(row.clone())?, row.try_get("password_hash")?))).transpose()
+            .bind(username).fetch_optional(&self.pool).await?.map(|row| { let password_hash: String = row.try_get("password_hash")?; Ok((user_from_row(row)?, password_hash)) }).transpose()
     }
 
     pub async fn update_user(&self, id: Uuid, email: Option<Option<&str>>, password_hash: Option<&str>, role: Option<Role>, enabled: Option<bool>) -> anyhow::Result<Option<User>> {
@@ -233,7 +232,7 @@ impl Database {
         let id = Uuid::new_v4();
         if input.default_model { sqlx::query("UPDATE models SET default_model=FALSE").execute(&self.pool).await?; }
         sqlx::query("INSERT INTO models (id,name,version,model_type,path,input_width,input_height,class_list,enabled,default_model) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
-            .bind(id).bind(input.name).bind(input.version).bind(input.model_type).bind(input.path).bind(input.input_width).bind(input.input_height).bind(serde_json::to_value(input.class_list)?).bind(input.enabled).bind(input.default_model).execute(&self.pool).await?;
+            .bind(id).bind(input.name).bind(input.version).bind(input.model_type).bind(input.path).bind(input.input_width as i32).bind(input.input_height as i32).bind(serde_json::to_value(input.class_list)?).bind(input.enabled).bind(input.default_model).execute(&self.pool).await?;
         self.get_model(id).await?.context("model was not returned after insert")
     }
 
@@ -719,8 +718,8 @@ impl Database {
         let current = signature(track);
         let mut best: Option<(Identity, f32)> = None;
         for row in candidate_rows {
-            let identity = identity_from_row(row.clone())?;
             let stored: Value = row.try_get("signature")?;
+            let identity = identity_from_row(row)?;
             let stored: ObjectSignature = serde_json::from_value(stored)?;
             let value = similarity(&current, &stored);
             if value >= 0.72 && best.as_ref().map(|(_, score)| value > *score).unwrap_or(true) { best = Some((identity, value)); }
@@ -793,7 +792,7 @@ fn model_assignment_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Model
 fn fusion_result_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<FusionResult> { Ok(FusionResult { id: row.try_get("id")?, camera_id: row.try_get("camera_id")?, detection_id: row.try_get("detection_id")?, source_model_ids: serde_json::from_value(row.try_get("source_model_ids")?)?, fused_confidence: row.try_get("fused_confidence")?, created_at: row.try_get("created_at")? }) }
 
 fn model_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Model> {
-    Ok(Model { id: row.try_get("id")?, name: row.try_get("name")?, version: row.try_get("version")?, model_type: row.try_get("model_type")?, path: row.try_get("path")?, input_width: row.try_get("input_width")?, input_height: row.try_get("input_height")?, class_list: serde_json::from_value(row.try_get("class_list")?)?, enabled: row.try_get("enabled")?, default_model: row.try_get("default_model")?, created_at: row.try_get("created_at")? })
+    Ok(Model { id: row.try_get("id")?, name: row.try_get("name")?, version: row.try_get("version")?, model_type: row.try_get("model_type")?, path: row.try_get("path")?, input_width: row.try_get::<i32, _>("input_width")? as u32, input_height: row.try_get::<i32, _>("input_height")? as u32, class_list: serde_json::from_value(row.try_get("class_list")?)?, enabled: row.try_get("enabled")?, default_model: row.try_get("default_model")?, created_at: row.try_get("created_at")? })
 }
 
 fn benchmark_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<BenchmarkResult> { Ok(BenchmarkResult { id: row.try_get("id")?, model_id: row.try_get("model_id")?, fps: row.try_get("fps")?, average_inference_time_ms: row.try_get("average_inference_time_ms")?, gpu_memory_usage_mb: row.try_get::<Option<i64>, _>("gpu_memory_usage_mb")?.map(|value| value as u64), cpu_usage_percent: row.try_get("cpu_usage_percent")?, test_timestamp: row.try_get("test_timestamp")? }) }

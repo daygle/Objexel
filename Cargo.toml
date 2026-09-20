@@ -33,15 +33,15 @@ repository = "https://github.com/objexel/objexel"
 
 [workspace.dependencies]
 anyhow = "1.0"
-argon2 = "0.5"
+argon2 = { version = "0.5", features = ["std"] }
 async-trait = "0.1"
 axum = { version = "0.7", features = ["macros", "ws"] }
 chrono = { version = "0.4", features = ["serde"] }
-ndarray = "0.16"
+ndarray = "0.17"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "migrate"] }
-tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "signal", "net", "sync", "time", "io-util"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "migrate", "macros"] }
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "signal", "net", "sync", "time", "io-util", "process"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 utoipa = { version = "5.4", features = ["chrono", "uuid"] }
 tracing = "0.1"

@@ -46,15 +46,27 @@ pub struct ModelManager {
 impl ModelManager {
     pub async fn load(&self, config: ModelConfig) -> Result<()> {
         validate_model_config(&config)?;
-        let mut builder = Session::builder().context("create ONNX Runtime session builder")?;
-        // Prefer CUDA when available, while retaining the built-in CPU provider as a
-        // portable fallback for N100 and other CPU-only hosts.
-        builder = builder.with_execution_providers([
-            ep::CUDA::default().build(),
-            ep::CPU::default().build(),
-        ])?;
-        let session = builder.commit_from_file(&config.path).with_context(|| format!("load ONNX model {}", config.path.display()))?;
-        let loaded = Arc::new(LoadedModel { config: config.clone(), session: Mutex::new(session) });
+        // Build the session in a scope that ends before any await: ort's
+        // SessionBuilder is neither Send nor Sync, so it must not be held
+        // across the map lock below.
+        let loaded = {
+            let mut builder = Session::builder().context("create ONNX Runtime session builder")?;
+            // Prefer CUDA when available, while retaining the built-in CPU provider as a
+            // portable fallback for N100 and other CPU-only hosts. A failed provider
+            // configuration recovers the builder so the session still loads with defaults.
+            builder = match builder.with_execution_providers([
+                ep::CUDA::default().build(),
+                ep::CPU::default().build(),
+            ]) {
+                Ok(builder) => builder,
+                Err(error) => {
+                    tracing::warn!(error = %error.message(), "failed to configure ONNX execution providers; using runtime defaults");
+                    error.recover()
+                }
+            };
+            let session = builder.commit_from_file(&config.path).with_context(|| format!("load ONNX model {}", config.path.display()))?;
+            Arc::new(LoadedModel { config: config.clone(), session: Mutex::new(session) })
+        };
         self.models.write().await.insert(config.id, loaded);
         let mut active = self.active.write().await;
         if active.is_none() { *active = Some(config.id); }
@@ -105,8 +117,8 @@ impl ModelManager {
         let input = ArrayD::from_shape_vec(IxDyn(&frame.shape), frame.data).context("invalid detector tensor shape")?;
         let mut session = model.session.lock().map_err(|_| anyhow::anyhow!("ONNX session lock poisoned"))?;
         let outputs = session.run(ort::inputs![TensorRef::from_array_view(input.view())?]).context("run ONNX inference")?;
-        let output = outputs.get(0).context("ONNX model returned no outputs")?;
-        let (_, values) = output.try_extract_tensor::<f32>().context("decode ONNX output tensor")?;
+        if outputs.len() == 0 { bail!("ONNX model returned no outputs"); }
+        let (_, values) = outputs[0].try_extract_tensor::<f32>().context("decode ONNX output tensor")?;
         if values.len() % 6 != 0 { bail!("unsupported detector output: expected groups of 6 values, got {}", values.len()); }
         let mut detections = Vec::new();
         for row in values.chunks_exact(6) {

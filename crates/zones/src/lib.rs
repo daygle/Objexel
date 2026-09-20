@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use objexel_common::{Track, Zone, ZoneEvent, ZoneEventType};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -35,6 +35,7 @@ impl ZoneEvaluator {
                         events.push(event(zone, track, ZoneEventType::Exited, now, Some((now - previous.entered_at).num_milliseconds())));
                     }
                     (Some(_), true) => {}
+                    (Some(_), false) => {}
                     (None, false) => {}
                 }
             }
@@ -67,6 +68,7 @@ pub fn point_in_polygon(point: (f32, f32), polygon: &[objexel_common::PolygonPoi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Duration;
     use objexel_common::{BoundingBox, PolygonPoint};
     #[test]
     fn point_in_square_is_detected() {
