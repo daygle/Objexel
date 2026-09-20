@@ -18,6 +18,7 @@ objexel-camera = { path = "../camera" }
 objexel-common = { path = "../common" }
 objexel-database = { path = "../database" }
 objexel-detector = { path = "../detector" }
+reqwest.workspace = true
 objexel-pipeline = { path = "../pipeline" }
 objexel-models = { path = "../models" }
 objexel-playback = { path = "../playback" }

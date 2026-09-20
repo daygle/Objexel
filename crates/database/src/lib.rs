@@ -4,14 +4,16 @@ use objexel_analytics::{AnalyticsMetric, AnalyticsSnapshot, AnalyticsSummary};
 use objexel_adaptive::AdaptiveAssessment;
 use objexel_behaviour::Behaviour;
 use objexel_identity::{familiarity, new_identity, score, similarity, signature, ObjectSignature};
-use objexel_common::{CreateModelAssignment, FusionResult, Identity, IdentityObservation, IdentityStatistics, ModelAssignment, UpdateIdentity};
+use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, Clip, CreateAction, CreateCamera, CreateModel, CreateModelAssignment, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, CreateZone, Detection, Event, EventSeverity, FusionResult, Identity, IdentityObservation, IdentityStatistics, Model, ModelAssignment, ModelCatalogEntry, ModelDownload, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, RuleCondition, RuleConditionInput, Snapshot, Track, UpdateAction, UpdateCamera, UpdateIdentity, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent, ZoneEventType};
 use objexel_search::{SearchFilters, SearchResult};
-use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, Clip, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, CreateZone, Detection, Event, EventSeverity, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, RuleCondition, RuleConditionInput, Snapshot, Track, UpdateAction, UpdateCamera, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent, ZoneEventType};
+use objexel_common::UpdateInfo;
 use serde_json::Value;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use uuid::Uuid;
-mod identity_helpers;
-use identity_helpers::{identity_from_row, identity_observation_from_row, identity_statistics_from_row};
+mod identity_helpers;use identity_helpers::{identity_from_row, identity_observation_from_row, identity_statistics_from_row};
+
+fn model_catalog_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<ModelCatalogEntry> { Ok(ModelCatalogEntry { id: row.try_get("id")?, name: row.try_get("name")?, version: row.try_get("version")?, model_type: row.try_get("model_type")?, download_url: row.try_get("download_url")?, sha256: row.try_get("sha256")?, input_width: row.try_get::<i32, _>("input_width")? as u32, input_height: row.try_get::<i32, _>("input_height")? as u32, class_list: serde_json::from_value(row.try_get("class_list")?).unwrap_or_default(), archive_format: row.try_get("archive_format")? }) }
+fn model_download_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<ModelDownload> { Ok(ModelDownload { id: row.try_get("id")?, catalog_id: row.try_get("catalog_id")?, status: row.try_get("status")?, progress_percent: row.try_get::<i16, _>("progress_percent")? as u8, bytes_downloaded: row.try_get("bytes_downloaded")?, total_bytes: row.try_get("total_bytes")?, error: row.try_get("error")?, model_id: row.try_get("model_id")?, created_at: row.try_get("created_at")?, updated_at: row.try_get("updated_at")? }) }
 
 #[derive(Clone)]
 pub struct Database {
@@ -49,6 +51,14 @@ impl Database {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    pub async fn update_info(&self) -> anyhow::Result<Option<UpdateInfo>> {
+        sqlx::query("SELECT latest_version,release_url,notes FROM update_state WHERE id=TRUE").fetch_optional(&self.pool).await?.map(|row| { Ok(UpdateInfo { current_version: env!("CARGO_PKG_VERSION").into(), latest_version: row.try_get("latest_version")?, update_available: false, release_url: row.try_get("release_url")?, notes: row.try_get("notes")? }) }).transpose()
+    }
+
+    pub async fn save_update_info(&self, latest: &str, url: Option<&str>, notes: Option<&str>) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO update_state (id,latest_version,release_url,notes,checked_at) VALUES (TRUE,$1,$2,$3,NOW()) ON CONFLICT (id) DO UPDATE SET latest_version=EXCLUDED.latest_version,release_url=EXCLUDED.release_url,notes=EXCLUDED.notes,checked_at=NOW()").bind(latest).bind(url).bind(notes).execute(&self.pool).await?; Ok(())
     }
 
     pub async fn user_count(&self) -> anyhow::Result<i64> {
@@ -177,6 +187,37 @@ impl Database {
         self.get_camera(id).await
     }
 
+    pub async fn list_model_catalog(&self) -> anyhow::Result<Vec<ModelCatalogEntry>> {
+        let rows = sqlx::query("SELECT id,name,version,model_type,download_url,sha256,input_width,input_height,class_list,archive_format FROM model_catalog ORDER BY name,version")
+            .fetch_all(&self.pool).await?;
+        rows.into_iter().map(model_catalog_from_row).collect()
+    }
+
+    pub async fn upsert_model_catalog(&self, entry: &ModelCatalogEntry) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO model_catalog (id,name,version,model_type,download_url,sha256,input_width,input_height,class_list,archive_format) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,version=EXCLUDED.version,model_type=EXCLUDED.model_type,download_url=EXCLUDED.download_url,sha256=EXCLUDED.sha256,input_width=EXCLUDED.input_width,input_height=EXCLUDED.input_height,class_list=EXCLUDED.class_list,archive_format=EXCLUDED.archive_format,updated_at=NOW()")
+            .bind(&entry.id).bind(&entry.name).bind(&entry.version).bind(&entry.model_type).bind(&entry.download_url).bind(&entry.sha256).bind(entry.input_width as i32).bind(entry.input_height as i32).bind(serde_json::to_value(&entry.class_list)?).bind(&entry.archive_format).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn get_model_catalog(&self, id: &str) -> anyhow::Result<Option<ModelCatalogEntry>> {
+        sqlx::query("SELECT id,name,version,model_type,download_url,sha256,input_width,input_height,class_list,archive_format FROM model_catalog WHERE id=$1").bind(id).fetch_optional(&self.pool).await?.map(model_catalog_from_row).transpose()
+    }
+
+    pub async fn create_model_download(&self, catalog_id: &str) -> anyhow::Result<ModelDownload> {
+        let id = Uuid::new_v4();
+        sqlx::query("INSERT INTO model_downloads (id,catalog_id,status) VALUES ($1,$2,'queued')").bind(id).bind(catalog_id).execute(&self.pool).await?;
+        self.get_model_download(id).await?.context("download was not returned after insert")
+    }
+
+    pub async fn get_model_download(&self, id: Uuid) -> anyhow::Result<Option<ModelDownload>> {
+        sqlx::query("SELECT id,catalog_id,status,progress_percent,bytes_downloaded,total_bytes,error,model_id,created_at,updated_at FROM model_downloads WHERE id=$1").bind(id).fetch_optional(&self.pool).await?.map(model_download_from_row).transpose()
+    }
+
+    pub async fn update_model_download(&self, id: Uuid, status: &str, progress: u8, bytes: i64, total: Option<i64>, error: Option<&str>, model_id: Option<Uuid>) -> anyhow::Result<()> {
+        sqlx::query("UPDATE model_downloads SET status=$2,progress_percent=$3,bytes_downloaded=$4,total_bytes=$5,error=$6,model_id=$7,updated_at=NOW() WHERE id=$1").bind(id).bind(status).bind(progress as i16).bind(bytes).bind(total).bind(error).bind(model_id).execute(&self.pool).await?;
+        Ok(())
+    }
+
     pub async fn list_models(&self) -> anyhow::Result<Vec<Model>> {
         let rows = sqlx::query("SELECT id, name, version, model_type, path, input_width, input_height, class_list, enabled, default_model, created_at FROM models ORDER BY name")
             .fetch_all(&self.pool).await?;
@@ -194,6 +235,12 @@ impl Database {
         sqlx::query("INSERT INTO models (id,name,version,model_type,path,input_width,input_height,class_list,enabled,default_model) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
             .bind(id).bind(input.name).bind(input.version).bind(input.model_type).bind(input.path).bind(input.input_width).bind(input.input_height).bind(serde_json::to_value(input.class_list)?).bind(input.enabled).bind(input.default_model).execute(&self.pool).await?;
         self.get_model(id).await?.context("model was not returned after insert")
+    }
+
+    pub async fn set_model_enabled(&self, id: Uuid, enabled: bool) -> anyhow::Result<Option<Model>> {
+        let result = sqlx::query("UPDATE models SET enabled=$2, default_model=CASE WHEN $2 THEN default_model ELSE FALSE END WHERE id=$1").bind(id).bind(enabled).execute(&self.pool).await?;
+        if result.rows_affected() == 0 { return Ok(None); }
+        self.get_model(id).await
     }
 
     pub async fn delete_model(&self, id: Uuid) -> anyhow::Result<bool> { let result = sqlx::query("DELETE FROM models WHERE id=$1").bind(id).execute(&self.pool).await?; Ok(result.rows_affected() == 1) }

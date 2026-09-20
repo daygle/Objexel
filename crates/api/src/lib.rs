@@ -11,7 +11,7 @@ use chrono::Utc;
 use objexel_actions::ActionDispatcher;
 use objexel_auth::{digest_token, generate_csrf_token, generate_token, hash_password, verify_password, AuthResponse, CreateUser, LoginRequest, Role, SessionUser, UpdateUser, User};
 use objexel_analytics::AnalyticsSummary;
-use objexel_common::{AnomalyEvent, Behaviour, BehaviourScore, CreateModelAssignment, IdentityScore, FusionResult, Identity, IdentityObservation, IdentityStatistics, IntelligenceSummary, ModelAssignment, UpdateIdentity};
+use objexel_common::{AnomalyEvent, Behaviour, BehaviourScore, CreateModelAssignment, IdentityScore, FusionResult, Identity, IdentityObservation, IdentityStatistics, IntelligenceSummary, ModelAssignment, ModelCatalogEntry, ModelDownload, UpdateIdentity, UpdateInfo, UpdateModelEnabled};
 use objexel_camera::{CameraManager, CameraService};
 use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, CameraTestResult, Clip, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, Detection, Event, HealthResponse, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, Snapshot, StreamMetadata, Track, UpdateAction, UpdateCamera, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent};
 use objexel_pipeline::ObservationPipeline;
@@ -60,8 +60,8 @@ impl RuntimeMetrics {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, ready, liveness, readiness, metrics, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, list_templates, create_template, test_notification, global_search, search_events, search_observations, search_tracks, search_recordings, search_detections, search_behaviours, list_behaviours, get_behaviour, list_identities, get_identity, update_identity, identity_history, intelligence_summary, list_anomalies, list_fusion, list_model_assignments, create_model_assignment, analytics_summary, analytics_cameras, analytics_zones, analytics_models, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
-    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Recording, Clip, Snapshot, SearchResult, AnalyticsSummary, Behaviour, Identity, IdentityObservation, IdentityStatistics, UpdateIdentity, IdentityScore, BehaviourScore, AnomalyEvent, IntelligenceSummary, ModelAssignment, CreateModelAssignment, FusionResult, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
+    paths(health, ready, liveness, readiness, metrics, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, list_model_catalog, download_model, get_model_download, get_model, create_model, set_model_enabled, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, list_templates, create_template, test_notification, global_search, search_events, search_observations, search_tracks, search_recordings, search_detections, search_behaviours, list_behaviours, get_behaviour, list_identities, get_identity, update_identity, identity_history, intelligence_summary, list_anomalies, list_fusion, list_model_assignments, create_model_assignment, analytics_summary, analytics_cameras, analytics_zones, analytics_models, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
+    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, ModelCatalogEntry, ModelDownload, UpdateInfo, UpdateModelEnabled, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Recording, Clip, Snapshot, SearchResult, AnalyticsSummary, Behaviour, Identity, IdentityObservation, IdentityStatistics, UpdateIdentity, IdentityScore, BehaviourScore, AnomalyEvent, IntelligenceSummary, ModelAssignment, CreateModelAssignment, FusionResult, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
     tags((name = "cameras", description = "Camera management and RTSP ingestion"))
 )]
 pub struct ApiDoc;
@@ -98,7 +98,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/openapi.json", get(openapi))
         .route("/api/v1/events", get(events_socket))
         .route("/api/models", get(list_models).post(create_model))
-        .route("/api/models/:id", get(get_model).delete(delete_model))
+        .route("/api/models/catalog", get(list_model_catalog))
+        .route("/api/models/catalog/:id/download", axum::routing::post(download_model))
+        .route("/api/models/downloads/:id", get(get_model_download))
+        .route("/api/updates", get(update_info))
+        .route("/api/updates/check", post(check_update))
+        .route("/api/models/:id", get(get_model).delete(delete_model).patch(set_model_enabled))
         .route("/api/models/reload", axum::routing::post(reload_models))
         .route("/api/models/:id/activate", axum::routing::post(activate_model))
         .route("/api/models/:id/benchmark", axum::routing::post(benchmark_model))
@@ -417,6 +422,35 @@ async fn assign_camera_model(State(state): State<Arc<AppState>>, Path((id, model
 #[derive(Debug, serde::Deserialize)]
 struct LimitQuery { limit: Option<i64> }
 
+#[utoipa::path(get, path = "/api/updates", tag = "updates", responses((status = 200, body = UpdateInfo), (status = 503)))]
+async fn update_info(State(state): State<Arc<AppState>>) -> Result<Json<UpdateInfo>, ErrorResponse> { let current=env!("CARGO_PKG_VERSION").to_string(); let mut info=database(&state)?.update_info().await.map_err(internal_error)?.unwrap_or(UpdateInfo{current_version:current.clone(),latest_version:None,update_available:false,release_url:None,notes:None}); info.current_version=current.clone(); info.update_available=info.latest_version.as_ref().is_some_and(|v| v.trim_start_matches('v') != current.trim_start_matches('v')); Ok(Json(info)) }
+
+#[utoipa::path(post, path = "/api/updates/check", tag = "updates", responses((status = 200, body = UpdateInfo), (status = 502), (status = 503)))]
+async fn check_update(State(state): State<Arc<AppState>>) -> Result<Json<UpdateInfo>, ErrorResponse> { let response=reqwest::Client::new().get("https://api.github.com/repos/objexel/objexel/releases/latest").header("user-agent","objexel").send().await.map_err(|e| bad_gateway(&e.to_string()))?.error_for_status().map_err(|e| bad_gateway(&e.to_string()))?; let release: Value=response.json().await.map_err(|e| bad_gateway(&e.to_string()))?; let tag=release.get("tag_name").and_then(Value::as_str).ok_or_else(|| bad_gateway("release response did not contain tag_name"))?; let url=release.get("html_url").and_then(Value::as_str); let notes=release.get("body").and_then(Value::as_str); database(&state)?.save_update_info(tag,url,notes).await.map_err(internal_error)?; update_info(State(state)).await }
+
+#[utoipa::path(get, path = "/api/models/catalog", tag = "models", responses((status = 200, body = [ModelCatalogEntry]), (status = 503)))]
+async fn list_model_catalog(State(state): State<Arc<AppState>>) -> Result<Json<Vec<ModelCatalogEntry>>, ErrorResponse> { database(&state)?.list_model_catalog().await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(post, path = "/api/models/catalog/{id}/download", tag = "models", params(("id" = String, Path)), responses((status = 202, body = ModelDownload), (status = 404), (status = 400)))]
+async fn download_model(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Result<(StatusCode, Json<ModelDownload>), ErrorResponse> {
+    let database = database(&state)?; let entry = database.get_model_catalog(&id).await.map_err(internal_error)?.ok_or_else(|| not_found("catalog entry not found"))?; let download = database.create_model_download(&id).await.map_err(internal_error)?; let database_clone = database.clone(); let root = std::env::var("OBJEXEL_MODEL_DIR").unwrap_or_else(|_| "/models".into());
+    let _ = database.update_model_download(download.id, "downloading", 0, 0, None, None, None).await;
+    tokio::spawn(async move {
+        let registry = ModelRegistry::new(root, objexel_detector::ModelManager::default());
+        let progress_database = database_clone.clone();
+        let progress_id = download.id;
+        let result = registry.download_catalog_entry_with_progress(&entry, move |progress, bytes, total| {
+            let database = progress_database.clone();
+            tokio::spawn(async move { let _ = database.update_model_download(progress_id, "downloading", progress, bytes, total, None, None).await; });
+        }).await;
+        match result { Ok(path) => { let input = CreateModel { name: entry.name, version: entry.version, model_type: entry.model_type, path: path.to_string_lossy().into_owned(), input_width: entry.input_width, input_height: entry.input_height, class_list: entry.class_list, enabled: false, default_model: false }; match database_clone.create_model(input).await { Ok(model) => { let _=database_clone.update_model_download(download.id,"completed",100,0,None,None,Some(model.id)).await; }, Err(error) => { let _=database_clone.update_model_download(download.id,"failed",0,0,None,Some(&error.to_string()),None).await; } } }, Err(error) => { let message=error.to_string(); let _=database_clone.update_model_download(download.id,"failed",0,0,None,Some(&message),None).await; } }
+    });
+    Ok((StatusCode::ACCEPTED, Json(download)))
+}
+
+#[utoipa::path(get, path = "/api/models/downloads/{id}", tag = "models", params(("id" = Uuid, Path)), responses((status = 200, body = ModelDownload), (status = 404)))]
+async fn get_model_download(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<ModelDownload>, ErrorResponse> { database(&state)?.get_model_download(id).await.map_err(internal_error)?.map(Json).ok_or_else(|| not_found("download not found")) }
+
 #[utoipa::path(get, path = "/api/models", tag = "models", responses((status = 200, body = [Model]), (status = 503)))]
 async fn list_models(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Model>>, ErrorResponse> {
     database(&state)?.list_models().await.map(Json).map_err(internal_error)
@@ -433,6 +467,9 @@ async fn create_model(State(state): State<Arc<AppState>>, Json(input): Json<Crea
     database.audit(None, "model.created", "model", Some(model.id), json!({})).await.map_err(internal_error)?;
     Ok((StatusCode::CREATED, Json(model)))
 }
+
+#[utoipa::path(patch, path = "/api/models/{id}", tag = "models", params(("id" = Uuid, Path)), request_body = UpdateModelEnabled, responses((status = 200, body = Model), (status = 404), (status = 503)))]
+async fn set_model_enabled(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>, Json(input): Json<UpdateModelEnabled>) -> Result<Json<Model>, ErrorResponse> { database(&state)?.set_model_enabled(id, input.enabled).await.map_err(internal_error)?.map(Json).ok_or_else(|| not_found("model not found")) }
 
 #[utoipa::path(delete, path = "/api/models/{id}", tag = "models", params(("id" = Uuid, Path)), responses((status = 204), (status = 404), (status = 503)))]
 async fn delete_model(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<StatusCode, ErrorResponse> {

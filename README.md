@@ -1,108 +1,72 @@
 # Objexel
 
-Objexel is a self-hosted, Linux-first AI camera platform for home servers and Proxmox. It combines a Rust/Axum backend, SvelteKit web interface, PostgreSQL, ONNX Runtime, YOLO-compatible ONNX models, RTSP/FFmpeg media handling, tracking, behaviour analysis, identity familiarity, rules, events, recordings, and notifications.
+Objexel is a self-hosted, Linux-first AI camera platform for object detection, tracking, behaviour analysis, and event intelligence. It is designed for home servers and Proxmox deployments, with PostgreSQL persistence, ONNX Runtime inference, FFmpeg/RTSP media handling, and a SvelteKit web interface.
 
-> **Status:** active development / controlled testing. The architecture is substantial, but production deployment still requires the verification checklist below.
-
-## Stack
+## Current stack
 
 - **Backend:** Rust, Tokio, Axum, SQLx, Serde, tracing
-- **Database:** PostgreSQL 16
-- **AI:** ONNX Runtime with CUDA preference and CPU fallback; YOLO-compatible ONNX models
-- **Frontend:** SvelteKit, TypeScript, Vite
-- **Media:** RTSP, FFmpeg, continuous recordings, event clips, snapshots
-- **Deployment:** Docker Compose, Debian 13, Ubuntu 24.04+, Proxmox VMs
+- **Database:** PostgreSQL
+- **AI:** ONNX Runtime with CPU/CUDA execution providers and YOLO-compatible ONNX models
+- **Media:** FFmpeg, RTSP, recordings, clips, and snapshots
+- **Web:** SvelteKit, TypeScript, and a dark operator dashboard
+- **Deployment:** Docker Compose, with Debian/Ubuntu and Proxmox as primary targets
 
-## Current capabilities
+## Quick start
 
-- Camera registration, RTSP probing, snapshots, health monitoring, and reconnect backoff
-- ONNX model discovery, registration, activation, per-camera assignment, reload, and benchmarking
-- Detection, IoU tracking, observations, zones, behaviours, identities, anomaly scoring, and rules
-- Events, searchable analytics, recordings, clips, snapshots, notifications, and WebSocket events
-- Local users with Administrator, Operator, and Viewer roles
-- Argon2id password hashing, revocable HttpOnly sessions, SameSite cookies, and CSRF checks for user administration
-- Health, liveness, readiness, metrics, SQLx migrations, Docker restart policy, and graceful shutdown
+The recommended deployment is Docker Compose on Debian 13 or Ubuntu 24.04+.
 
-## Quick start with Docker Compose
-
-```bash
-sudo apt update
-sudo apt install -y ca-certificates curl git openssl
-git clone https://github.com/daygle/Objexel.git
-cd Objexel
-mkdir -p models recordings clips snapshots backups
-printf 'POSTGRES_PASSWORD=%s\nOBJEXEL_COOKIE_SECURE=0\n' "$(openssl rand -hex 24)" > .env
+```sh
+mkdir -p /opt/objexel
+cd /opt/objexel
+git clone https://github.com/daygle/Objexel.git .
+mkdir -p config models recordings clips snapshots backups
+printf 'POSTGRES_PASSWORD=%s\nOBJEXEL_COOKIE_SECURE=1\n' "$(openssl rand -hex 24)" > .env
 docker compose up -d --build
 curl -fsS http://localhost:8080/liveness
 ```
 
-For a network-exposed deployment, terminate HTTPS in a trusted reverse proxy and set `OBJEXEL_COOKIE_SECURE=1`. Do not expose PostgreSQL publicly.
+Open `http://SERVER:8080/setup` to create the first administrator. The setup route is permanently disabled after the first account exists. Then sign in, add a camera, and configure a model.
 
-## First run
+See [INSTALL.md](INSTALL.md) for CPU-only, NVIDIA, Tesla P4, native Debian, and Proxmox guidance.
 
-1. Open `http://SERVER:8080/setup`.
-2. Create the first Administrator account with a password of at least 12 characters.
-3. Sign in at `http://SERVER:8080/login`.
-4. Add and test a camera using its RTSP URL.
-5. Copy ONNX files into `models/` (or `/models/yolov8`, `/models/yolov11`, or `/models/yolov26`).
-6. Open **Models**, reload the registry, activate a model, and assign it to a camera.
-7. Verify one detection, one event, and one recording clip before adding more cameras.
+## Models
 
-The setup endpoint rejects new setup attempts after the first user exists. Model files are currently installed manually; the application does not yet download models from an external registry.
+Objexel supports:
 
-## Useful endpoints
+- local ONNX model registration and discovery
+- model versions, input dimensions, and class-label metadata
+- CPU and CUDA inference fallback
+- model enable/disable and default activation
+- verified catalog downloads with streamed progress
+- SHA-256 verification before registration
+- safe `tar.gz` and `zip` extraction with path traversal rejection
+- benchmark results and per-camera model assignments
 
-- `GET /health` — process health
-- `GET /liveness` — container liveness
-- `GET /readiness` and `GET /ready` — PostgreSQL readiness
-- `GET /metrics` — runtime and camera metrics
-- `GET /api/openapi.json` — generated API description
-- `POST /api/auth/setup` — first Administrator creation
-- `POST /api/auth/login` / `POST /api/auth/logout` / `GET /api/auth/me`
-- `/api/cameras`, `/api/models`, `/api/detections`, `/api/tracks`, `/api/observations`, `/api/events`
-- `/api/behaviours`, `/api/identities`, `/api/intelligence`, `/api/analytics`
-- `/api/recordings`, `/api/clips`, `/api/snapshots`
+Catalog downloads are administrator-controlled and register disabled. Review, enable, benchmark, and activate models from **Models**. See [docs/model-management.md](docs/model-management.md).
 
-All application API routes other than health, authentication entry points, and OpenAPI require an authenticated session.
+## Updates
 
-## Repository layout
+Updates are deliberately operator-controlled:
 
-```text
-crates/                 Rust workspace crates
-  api/ auth/ camera/ database/ detector/ models/ ...
-web/                    SvelteKit frontend
-docker/                 API image definition
-docker-compose.yml      PostgreSQL + API development deployment
-migrations/             SQLx migrations
-docs/                   Architecture and subsystem documentation
-```
+1. Check for a release in the dashboard or review GitHub release notes.
+2. Back up PostgreSQL, configuration, and media metadata.
+3. Pull the versioned image or check out the release tag.
+4. Apply migrations through the normal API startup.
+5. Verify health, login, one camera, one model, one detection, one event, and one clip.
 
-## Documentation
+Tagged releases publish versioned Docker images to GitHub Container Registry and generate release notes through GitHub Actions. See [UPGRADE.md](UPGRADE.md), [BACKUP.md](BACKUP.md), and [OPERATIONS.md](OPERATIONS.md).
 
-### Installation and operations
+## Authentication
 
-- [INSTALL.md](INSTALL.md)
-- [OPERATIONS.md](OPERATIONS.md)
-- [BACKUP.md](BACKUP.md)
-- [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-- [UPGRADE.md](UPGRADE.md)
+Objexel uses local accounts with Argon2id password hashing, secure session cookies, CSRF tokens for state-changing user operations, and Administrator, Operator, and Viewer roles. The first-run setup creates the administrator; later user management is available to administrators at `/users`.
 
-### Architecture
+## API
 
-- [docs/architecture.md](docs/architecture.md)
-- [docs/camera-ingestion.md](docs/camera-ingestion.md)
-- [docs/model-management.md](docs/model-management.md)
-- [docs/observation-pipeline.md](docs/observation-pipeline.md)
-- [docs/behaviour.md](docs/behaviour.md)
-- [docs/identity.md](docs/identity.md)
-- [docs/rules-engine.md](docs/rules-engine.md)
-- [docs/spatial-zones.md](docs/spatial-zones.md)
+The API exposes authenticated REST endpoints under `/api`, a generated OpenAPI document at `/api/openapi.json`, health endpoints at `/health`, `/liveness`, and `/readiness`, JSON metrics at `/metrics`, and a WebSocket event endpoint at `/api/v1/events`.
 
 ## Development
 
-Required local tools are Rust stable, PostgreSQL 16, FFmpeg, Node.js, and npm.
-
-```bash
+```sh
 cargo fmt --all -- --check
 cargo check --workspace
 cargo test --workspace
@@ -112,22 +76,4 @@ npm run check
 npm run build
 ```
 
-Pull requests are expected to pass the Rust, frontend, and Docker checks defined in `.github/workflows/ci.yml`.
-
-## Production readiness checklist
-
-Before calling an installation production-ready, verify:
-
-- HTTPS and secure cookies are enabled.
-- The first Administrator has been created and unused setup access is closed.
-- PostgreSQL and media backups have been restored successfully in a test environment.
-- At least one camera, model, detection, event, and clip have been tested.
-- Disk retention and storage monitoring are configured.
-- Upgrade and rollback procedures have been rehearsed.
-- The deployment is restricted to trusted users and networks.
-
-Objexel is not yet a packaged v1.0 release. Treat upgrades, model compatibility, GPU acceleration, and high camera counts as workload-specific until benchmarked on the target hardware.
-
-## License
-
-Apache-2.0
+CI runs Rust checks, SvelteKit checks/builds, and the API Docker build on pushes and pull requests. The project is still under active development; verify your actual camera, model, GPU, storage, and retention workload before calling a deployment production-ready.

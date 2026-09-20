@@ -7,10 +7,15 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+flate2.workspace = true
 objexel-common = { path = "../common" }
 objexel-detector = { path = "../detector" }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
+tar.workspace = true
+zip.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+reqwest.workspace = true

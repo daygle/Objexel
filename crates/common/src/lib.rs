@@ -101,6 +101,43 @@ pub struct CreateModel {
     pub default_model: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ModelCatalogEntry {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub model_type: String,
+    pub download_url: String,
+    pub sha256: String,
+    #[serde(default = "default_input_size")]
+    pub input_width: u32,
+    #[serde(default = "default_input_size")]
+    pub input_height: u32,
+    #[serde(default)]
+    pub class_list: Vec<String>,
+    #[serde(default)]
+    pub archive_format: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct UpdateModelEnabled {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ModelDownload {
+    pub id: Uuid,
+    pub catalog_id: String,
+    pub status: String,
+    pub progress_percent: u8,
+    pub bytes_downloaded: i64,
+    pub total_bytes: Option<i64>,
+    pub error: Option<String>,
+    pub model_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 fn default_input_size() -> u32 { 640 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -548,6 +585,15 @@ pub struct IntelligenceSummary {
     pub identities: Vec<Identity>,
     pub anomalies: Vec<AnomalyEvent>,
     pub highest_priority: Vec<AnomalyEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct UpdateInfo {
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub update_available: bool,
+    pub release_url: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
