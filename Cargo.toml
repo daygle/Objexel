@@ -35,7 +35,7 @@ repository = "https://github.com/daygle/Objexel"
 anyhow = "1.0"
 argon2 = { version = "0.5", features = ["std"] }
 async-trait = "0.1"
-axum = { version = "0.7", features = ["macros", "ws"] }
+axum = { version = "0.8", features = ["macros", "ws"] }
 chrono = { version = "0.4", features = ["serde"] }
 ndarray = "0.17"
 serde = { version = "1.0", features = ["derive"] }
