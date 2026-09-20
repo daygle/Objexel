@@ -33,6 +33,5 @@ RTSP cameras -> camera worker -> detector/tracker workers -> event engine
 
 ## Roadmap
 
-- **Phase 4:** ONNX Runtime detector with CPU/CUDA execution providers.
-- **Phase 5:** tracker, zones, event rules, and WebSocket events.
+- **Phase 5:** zones, event rules, and richer WebSocket observation events.
 - **Phase 6:** recordings, retention, notifications, authentication, and production deployment manifests.

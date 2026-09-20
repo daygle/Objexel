@@ -1,0 +1,11 @@
+[package]
+name = "objexel-observations"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+objexel-common = { path = "../common" }
+tracing.workspace = true
+uuid.workspace = true

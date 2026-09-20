@@ -63,6 +63,57 @@ pub struct CameraTestResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Model {
+    pub id: Uuid,
+    pub name: String,
+    pub version: String,
+    pub path: String,
+    pub active: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct BoundingBox {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Detection {
+    pub id: Uuid,
+    pub camera_id: Uuid,
+    pub track_id: Option<Uuid>,
+    pub model_id: Option<Uuid>,
+    pub object_class: String,
+    pub confidence: f32,
+    pub bounding_box: BoundingBox,
+    pub observed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Track {
+    pub id: Uuid,
+    pub camera_id: Uuid,
+    pub object_class: String,
+    pub first_seen: DateTime<Utc>,
+    pub last_seen: DateTime<Utc>,
+    pub duration_ms: i64,
+    pub movement_path: Vec<BoundingBox>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Observation {
+    pub id: Uuid,
+    pub camera_id: Uuid,
+    pub track_id: Uuid,
+    pub observation_type: String,
+    pub summary: String,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct HealthResponse {
     pub status: String,

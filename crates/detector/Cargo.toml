@@ -1,0 +1,15 @@
+[package]
+name = "objexel-detector"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+ndarray.workspace = true
+objexel-common = { path = "../common" }
+ort.workspace = true
+serde.workspace = true
+tracing.workspace = true
+uuid.workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "objexel-pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+objexel-common = { path = "../common" }
+objexel-database = { path = "../database" }
+objexel-detector = { path = "../detector" }
+objexel-observations = { path = "../observations" }
+objexel-tracker = { path = "../tracker" }
+tokio.workspace = true
+tracing.workspace = true

@@ -1,5 +1,6 @@
 use objexel_api::{router, AppState};
 use objexel_camera::CameraService;
+use objexel_pipeline::ObservationPipeline;
 use objexel_database::Database;
 use std::env;
 use tokio::net::TcpListener;
@@ -41,7 +42,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-    let app = router(AppState { database, camera_service });
+    let pipeline = database.as_ref().map(|database| ObservationPipeline::new(database.clone()));
+    let app = router(AppState { database, camera_service, pipeline });
     let address = env::var("OBJEXEL_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into());
     let listener = TcpListener::bind(&address).await?;
     tracing::info!(%address, "Objexel API listening");

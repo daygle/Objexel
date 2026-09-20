@@ -4,6 +4,10 @@ members = [
     "crates/common",
     "crates/database",
     "crates/camera",
+    "crates/detector",
+    "crates/tracker",
+    "crates/observations",
+    "crates/pipeline",
     "crates/api",
 ]
 
@@ -18,6 +22,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 axum = { version = "0.7", features = ["macros", "ws"] }
 chrono = { version = "0.4", features = ["serde"] }
+ndarray = "0.16"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "migrate"] }
@@ -27,3 +32,4 @@ utoipa = { version = "5.4", features = ["chrono", "uuid"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 uuid = { version = "1.10", features = ["serde", "v4"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "download-binaries", "cuda"] }

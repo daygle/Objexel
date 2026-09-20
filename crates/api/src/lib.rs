@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    extract::{Path, State, WebSocketUpgrade},
+    extract::{Path, Query, State, WebSocketUpgrade},
     http::{header, StatusCode},
     response::Response,
     routing::get,
@@ -8,7 +8,9 @@ use axum::{
 };
 use chrono::Utc;
 use objexel_camera::{CameraManager, CameraService};
-use objexel_common::{Camera, CameraStatus, CameraTestResult, CreateCamera, HealthResponse, StreamMetadata, UpdateCamera};
+use objexel_common::{Camera, CameraStatus, CameraTestResult, CreateCamera, Detection, HealthResponse, Model, Observation, StreamMetadata, Track, UpdateCamera};
+use objexel_detector::ModelConfig;
+use objexel_pipeline::ObservationPipeline;
 use objexel_database::Database;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -20,12 +22,13 @@ use uuid::Uuid;
 pub struct AppState {
     pub database: Option<Database>,
     pub camera_service: CameraService,
+    pub pipeline: Option<ObservationPipeline>,
 }
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status),
-    components(schemas(Camera, CreateCamera, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse)),
+    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, list_models, reload_models, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation),
+    components(schemas(Camera, CreateCamera, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, Detection, Track, Observation)),
     tags((name = "cameras", description = "Camera management and RTSP ingestion"))
 )]
 pub struct ApiDoc;
@@ -49,6 +52,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/openapi.json", get(openapi))
         .route("/api/v1/openapi.json", get(openapi))
         .route("/api/v1/events", get(events_socket))
+        .route("/api/models", get(list_models))
+        .route("/api/models/reload", axum::routing::post(reload_models))
+        .route("/api/detections", get(list_detections))
+        .route("/api/detections/:id", get(get_detection))
+        .route("/api/tracks", get(list_tracks))
+        .route("/api/tracks/:id", get(get_track))
+        .route("/api/observations", get(list_observations))
+        .route("/api/observations/:id", get(get_observation))
         .merge(camera_routes)
         .with_state(Arc::new(state))
         .layer(CorsLayer::permissive())
@@ -142,6 +153,56 @@ async fn camera_status(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>)
     match database(&state)?.get_camera(id).await.map_err(internal_error)? { Some(camera) => Ok(Json(camera)), None => Err(not_found("camera not found")) }
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct LimitQuery { limit: Option<i64> }
+
+#[utoipa::path(get, path = "/api/models", tag = "models", responses((status = 200, body = [Model]), (status = 503)))]
+async fn list_models(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Model>>, ErrorResponse> {
+    database(&state)?.list_models().await.map(Json).map_err(internal_error)
+}
+
+#[utoipa::path(post, path = "/api/models/reload", tag = "models", responses((status = 200), (status = 503)))]
+async fn reload_models(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ErrorResponse> {
+    let pipeline = state.pipeline.as_ref().ok_or_else(|| service_unavailable("database is not configured"))?;
+    let models = database(&state)?.list_models().await.map_err(internal_error)?;
+    let mut loaded = 0;
+    for model in models {
+        pipeline.models.load(ModelConfig { id: model.id, name: model.name, version: model.version, path: model.path.into(), labels: Vec::new(), confidence_threshold: 0.25 }).await.map_err(internal_error)?;
+        loaded += 1;
+    }
+    Ok(Json(json!({"loaded": loaded})))
+}
+
+#[utoipa::path(get, path = "/api/detections", tag = "observations", responses((status = 200, body = [Detection]), (status = 503)))]
+async fn list_detections(State(state): State<Arc<AppState>>, Query(query): Query<LimitQuery>) -> Result<Json<Vec<Detection>>, ErrorResponse> {
+    database(&state)?.list_detections(query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error)
+}
+
+#[utoipa::path(get, path = "/api/detections/{id}", tag = "observations", params(("id" = Uuid, Path)), responses((status = 200, body = Detection), (status = 404), (status = 503)))]
+async fn get_detection(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Detection>, ErrorResponse> {
+    match database(&state)?.get_detection(id).await.map_err(internal_error)? { Some(item) => Ok(Json(item)), None => Err(not_found("detection not found")) }
+}
+
+#[utoipa::path(get, path = "/api/tracks", tag = "observations", responses((status = 200, body = [Track]), (status = 503)))]
+async fn list_tracks(State(state): State<Arc<AppState>>, Query(query): Query<LimitQuery>) -> Result<Json<Vec<Track>>, ErrorResponse> {
+    database(&state)?.list_tracks(query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error)
+}
+
+#[utoipa::path(get, path = "/api/tracks/{id}", tag = "observations", params(("id" = Uuid, Path)), responses((status = 200, body = Track), (status = 404), (status = 503)))]
+async fn get_track(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Track>, ErrorResponse> {
+    match database(&state)?.get_track(id).await.map_err(internal_error)? { Some(item) => Ok(Json(item)), None => Err(not_found("track not found")) }
+}
+
+#[utoipa::path(get, path = "/api/observations", tag = "observations", responses((status = 200, body = [Observation]), (status = 503)))]
+async fn list_observations(State(state): State<Arc<AppState>>, Query(query): Query<LimitQuery>) -> Result<Json<Vec<Observation>>, ErrorResponse> {
+    database(&state)?.list_observations(query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error)
+}
+
+#[utoipa::path(get, path = "/api/observations/{id}", tag = "observations", params(("id" = Uuid, Path)), responses((status = 200, body = Observation), (status = 404), (status = 503)))]
+async fn get_observation(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Observation>, ErrorResponse> {
+    match database(&state)?.get_observation(id).await.map_err(internal_error)? { Some(item) => Ok(Json(item)), None => Err(not_found("observation not found")) }
+}
+
 async fn events_socket(ws: WebSocketUpgrade) -> impl axum::response::IntoResponse { ws.on_upgrade(|_socket| async move { tracing::debug!("event websocket connected"); }) }
 async fn openapi() -> Json<utoipa::openapi::OpenApi> { Json(ApiDoc::openapi()) }
 
@@ -161,7 +222,7 @@ mod tests {
     use axum::{body::Body, http::{Request, StatusCode}};
     use tower::ServiceExt;
 
-    fn test_state() -> AppState { AppState { database: None, camera_service: CameraService::default() } }
+    fn test_state() -> AppState { AppState { database: None, camera_service: CameraService::default(), pipeline: None } }
 
     #[tokio::test]
     async fn health_endpoint_is_available() {
