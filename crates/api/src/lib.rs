@@ -8,12 +8,14 @@ use axum::{
 };
 use chrono::Utc;
 use objexel_actions::ActionDispatcher;
+use objexel_analytics::AnalyticsSummary;
 use objexel_camera::{CameraManager, CameraService};
 use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, CameraTestResult, Clip, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, Detection, Event, HealthResponse, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, Snapshot, StreamMetadata, Track, UpdateAction, UpdateCamera, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent};
 use objexel_pipeline::ObservationPipeline;
 use objexel_models::ModelRegistry;
 use objexel_playback::PlaybackService;
 use objexel_recorder::Recorder;
+use objexel_search::{SearchFilters, SearchResult};
 use objexel_zones::validate_polygon;
 use objexel_database::Database;
 use serde_json::{json, Value};
@@ -33,8 +35,8 @@ pub struct AppState {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, list_templates, create_template, test_notification, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
-    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Recording, Clip, Snapshot, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
+    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, list_templates, create_template, test_notification, global_search, search_events, search_observations, search_tracks, search_recordings, search_detections, analytics_summary, analytics_cameras, analytics_zones, analytics_models, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
+    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Recording, Clip, Snapshot, SearchResult, AnalyticsSummary, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
     tags((name = "cameras", description = "Camera management and RTSP ingestion"))
 )]
 pub struct ApiDoc;
@@ -74,6 +76,16 @@ pub fn router(state: AppState) -> Router {
         .route("/api/notification-providers/:id", axum::routing::put(update_provider))
         .route("/api/notification-templates", get(list_templates).post(create_template))
         .route("/api/test-notification", axum::routing::post(test_notification))
+        .route("/api/search", get(global_search))
+        .route("/api/search/events", get(search_events))
+        .route("/api/search/observations", get(search_observations))
+        .route("/api/search/tracks", get(search_tracks))
+        .route("/api/search/recordings", get(search_recordings))
+        .route("/api/search/detections", get(search_detections))
+        .route("/api/analytics", get(analytics_summary))
+        .route("/api/analytics/cameras", get(analytics_cameras))
+        .route("/api/analytics/zones", get(analytics_zones))
+        .route("/api/analytics/models", get(analytics_models))
         .route("/api/recordings", get(list_recordings))
         .route("/api/recordings/:id", get(get_recording))
         .route("/api/clips", get(list_clips))
@@ -287,6 +299,46 @@ async fn test_notification(State(state): State<Arc<AppState>>, Json(input): Json
     if !success { return Err(bad_request(&execution.error_message.unwrap_or_else(|| "notification failed".into()))); }
     Ok(Json(json!({"status":"sent"})))
 }
+
+#[utoipa::path(get, path = "/api/search", tag = "search", responses((status = 200, body = [SearchResult]), (status = 503)))]
+async fn global_search(State(state): State<Arc<AppState>>, Query(filters): Query<SearchFilters>) -> Result<Json<Vec<SearchResult>>, ErrorResponse> {
+    let database = database(&state)?;
+    let mut results = database.search_detections(&filters).await.map_err(internal_error)?;
+    results.extend(database.search_events(&filters).await.map_err(internal_error)?);
+    results.extend(database.search_observations(&filters).await.map_err(internal_error)?);
+    results.extend(database.search_tracks(&filters).await.map_err(internal_error)?);
+    results.extend(database.search_recordings(&filters).await.map_err(internal_error)?);
+    results.sort_by(|left, right| right.occurred_at.cmp(&left.occurred_at));
+    results.truncate(filters.limit() as usize);
+    Ok(Json(results))
+}
+
+#[utoipa::path(get, path = "/api/search/detections", tag = "search", responses((status = 200, body = [SearchResult]), (status = 503)))]
+async fn search_detections(State(state): State<Arc<AppState>>, Query(filters): Query<SearchFilters>) -> Result<Json<Vec<SearchResult>>, ErrorResponse> { database(&state)?.search_detections(&filters).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/search/events", tag = "search", responses((status = 200, body = [SearchResult]), (status = 503)))]
+async fn search_events(State(state): State<Arc<AppState>>, Query(filters): Query<SearchFilters>) -> Result<Json<Vec<SearchResult>>, ErrorResponse> { database(&state)?.search_events(&filters).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/search/observations", tag = "search", responses((status = 200, body = [SearchResult]), (status = 503)))]
+async fn search_observations(State(state): State<Arc<AppState>>, Query(filters): Query<SearchFilters>) -> Result<Json<Vec<SearchResult>>, ErrorResponse> { database(&state)?.search_observations(&filters).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/search/tracks", tag = "search", responses((status = 200, body = [SearchResult]), (status = 503)))]
+async fn search_tracks(State(state): State<Arc<AppState>>, Query(filters): Query<SearchFilters>) -> Result<Json<Vec<SearchResult>>, ErrorResponse> { database(&state)?.search_tracks(&filters).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/search/recordings", tag = "search", responses((status = 200, body = [SearchResult]), (status = 503)))]
+async fn search_recordings(State(state): State<Arc<AppState>>, Query(filters): Query<SearchFilters>) -> Result<Json<Vec<SearchResult>>, ErrorResponse> { database(&state)?.search_recordings(&filters).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/analytics", tag = "analytics", responses((status = 200, body = AnalyticsSummary), (status = 503)))]
+async fn analytics_summary(State(state): State<Arc<AppState>>, Query(filters): Query<SearchFilters>) -> Result<Json<AnalyticsSummary>, ErrorResponse> { database(&state)?.analytics(filters.from, filters.to).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/analytics/cameras", tag = "analytics", responses((status = 200, body = AnalyticsSummary), (status = 503)))]
+async fn analytics_cameras(State(state): State<Arc<AppState>>, Query(filters): Query<SearchFilters>) -> Result<Json<AnalyticsSummary>, ErrorResponse> { database(&state)?.analytics(filters.from, filters.to).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/analytics/zones", tag = "analytics", responses((status = 200, body = AnalyticsSummary), (status = 503)))]
+async fn analytics_zones(State(state): State<Arc<AppState>>, Query(filters): Query<SearchFilters>) -> Result<Json<AnalyticsSummary>, ErrorResponse> { database(&state)?.analytics(filters.from, filters.to).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/analytics/models", tag = "analytics", responses((status = 200, body = AnalyticsSummary), (status = 503)))]
+async fn analytics_models(State(state): State<Arc<AppState>>, Query(filters): Query<SearchFilters>) -> Result<Json<AnalyticsSummary>, ErrorResponse> { database(&state)?.analytics(filters.from, filters.to).await.map(Json).map_err(internal_error) }
 
 #[utoipa::path(get, path = "/api/recordings", tag = "recordings", responses((status = 200, body = [Recording]), (status = 503)))]
 async fn list_recordings(State(state): State<Arc<AppState>>, Query(query): Query<MediaQuery>) -> Result<Json<Vec<Recording>>, ErrorResponse> { database(&state)?.list_recordings(query.camera_id, query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error) }

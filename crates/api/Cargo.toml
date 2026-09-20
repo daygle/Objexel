@@ -9,6 +9,7 @@ anyhow.workspace = true
 chrono.workspace = true
 axum.workspace = true
 objexel-actions = { path = "../actions" }
+objexel-analytics = { path = "../analytics" }
 objexel-camera = { path = "../camera" }
 objexel-common = { path = "../common" }
 objexel-database = { path = "../database" }
@@ -17,6 +18,7 @@ objexel-pipeline = { path = "../pipeline" }
 objexel-models = { path = "../models" }
 objexel-playback = { path = "../playback" }
 objexel-recorder = { path = "../recorder" }
+objexel-search = { path = "../search" }
 objexel-rules = { path = "../rules" }
 objexel-zones = { path = "../zones" }
 serde.workspace = true

@@ -8,6 +8,8 @@ license.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 objexel-common = { path = "../common" }
+objexel-analytics = { path = "../analytics" }
+objexel-search = { path = "../search" }
 serde_json.workspace = true
 sqlx.workspace = true
 tracing.workspace = true
