@@ -44,8 +44,12 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Warm from main's CI cache; write to a release scope and never let a cache
+          # export hiccup fail a release build.
+          cache-from: |
+            type=gha,scope=docker-release
+            type=gha,scope=docker-main
+          cache-to: type=gha,mode=max,scope=docker-release,ignore-error=true
 
       - uses: softprops/action-gh-release@v2
         with:

@@ -8,6 +8,12 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded runs for the same PR ref so old commits stop competing for
+# runners and the build cache; let main pushes always run to completion.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   rust:
     name: Rust checks
@@ -37,7 +43,9 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - run: npm install
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
       - run: npm run check
       - run: npm run build
 
@@ -54,5 +62,10 @@ jobs:
           file: docker/api.Dockerfile
           push: false
           tags: objexel/api:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Scope the cache per ref so a PR run and the main run never collide on the
+          # same reservation ("failed to reserve cache"), while still warming from main.
+          # ignore-error keeps a transient cache hiccup from failing an otherwise good build.
+          cache-from: |
+            type=gha,scope=docker-${{ github.ref_name }}
+            type=gha,scope=docker-main
+          cache-to: type=gha,mode=max,scope=docker-${{ github.ref_name }},ignore-error=true

@@ -16,6 +16,10 @@ services:
     restart: unless-stopped
 
   api:
+    # Pull the published release image by default; `docker compose up -d --build`
+    # still builds from source and tags the result as this same reference.
+    # Pin a version for upgrades/rollbacks with OBJEXEL_IMAGE_TAG (e.g. v0.2.0).
+    image: ghcr.io/daygle/objexel:${OBJEXEL_IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: docker/api.Dockerfile

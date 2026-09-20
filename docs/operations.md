@@ -26,7 +26,7 @@ Inspect container logs with `docker compose logs --tail=200 api`. Do not put pas
 
 The API waits for PostgreSQL at startup, applies migrations, and exits on migration failure rather than serving a partially upgraded schema. Compose restarts both services after a crash. Camera monitors use bounded exponential reconnect delays. A clean SIGINT/SIGTERM lets the HTTP server stop accepting work before exit.
 
-If storage is exhausted, stop recording, preserve the database, free space according to [BACKUP.md](BACKUP.md), and restart the API. Never delete the PostgreSQL volume as a first response.
+If storage is exhausted, stop recording, preserve the database, free space according to [backup.md](backup.md), and restart the API. Never delete the PostgreSQL volume as a first response.
 
 ## Capacity validation
 
