@@ -2,6 +2,7 @@ use axum::{
     body::Body,
     extract::{Path, Query, State, WebSocketUpgrade, Request},
     http::{header, HeaderMap, HeaderValue, StatusCode},
+    middleware::{self, Next},
     response::Response,
     routing::{get, post},
     Json, Router,
@@ -80,6 +81,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/cameras/:id/status", get(camera_status))
         .route("/api/v1/cameras/:id/model/:model_id", axum::routing::post(assign_camera_model));
 
+    let shared_state = Arc::new(state);
     Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
@@ -152,7 +154,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/events", get(list_events))
         .route("/api/events/:id", get(get_event))
         .merge(camera_routes)
-            .with_state(Arc::new(state))
+        .layer(middleware::from_fn_with_state(shared_state.clone(), require_session))
+        .with_state(shared_state)
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
 }
@@ -186,6 +189,41 @@ async fn metrics(State(state): State<Arc<AppState>>) -> Json<Value> {
 
 const SESSION_COOKIE: &str = "objexel_session";
 const SESSION_DAYS: i64 = 7;
+
+fn public_path(path: &str) -> bool {
+    matches!(path, "/health" | "/ready" | "/readiness" | "/liveness" | "/api/auth/login" | "/api/auth/setup" | "/api/openapi.json" | "/api/v1/openapi.json")
+}
+
+fn auth_failure(status: StatusCode, message: &str) -> Response {
+    Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(json!({"error": message}).to_string()))
+        .expect("valid authentication response")
+}
+
+async fn require_session(State(state): State<Arc<AppState>>, request: Request, next: Next) -> Response {
+    if public_path(request.uri().path()) { return next.run(request).await; }
+    let database = match state.database.as_ref() {
+        Some(database) => database,
+        None => return auth_failure(StatusCode::SERVICE_UNAVAILABLE, "database is not configured"),
+    };
+    let token = match cookie_value(request.headers(), SESSION_COOKIE) {
+        Some(token) => token,
+        None => return auth_failure(StatusCode::UNAUTHORIZED, "authentication required"),
+    };
+    match database.session_user(&digest_token(&token)).await {
+        Ok(Some(session)) => {
+            let _ = database.update_session_seen(session.session_id).await;
+            next.run(request).await
+        }
+        Ok(None) => auth_failure(StatusCode::UNAUTHORIZED, "invalid or expired session"),
+        Err(error) => {
+            tracing::error!(%error, "session validation failed");
+            auth_failure(StatusCode::INTERNAL_SERVER_ERROR, "session validation failed")
+        }
+    }
+}
 
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     headers.get(header::COOKIE)?.to_str().ok()?.split(';').find_map(|part| { let (key, value) = part.trim().split_once('=')?; (key == name).then(|| value.to_owned()) })

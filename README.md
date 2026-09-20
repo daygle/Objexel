@@ -1,89 +1,132 @@
 # Objexel
 
-Self-hosted, Linux-first AI camera analytics for home servers and Proxmox. Objexel is being built incrementally as a Rust backend with a SvelteKit frontend, ONNX Runtime inference, RTSP/FFmpeg media handling, and PostgreSQL persistence.
+Objexel is a self-hosted, Linux-first AI camera platform for home servers and Proxmox. It combines a Rust/Axum backend, SvelteKit web interface, PostgreSQL, ONNX Runtime, YOLO-compatible ONNX models, RTSP/FFmpeg media handling, tracking, behaviour analysis, identity familiarity, rules, events, recordings, and notifications.
 
-## Phase 7
+> **Status:** active development / controlled testing. The architecture is substantial, but production deployment still requires the verification checklist below.
 
-Objexel now supports model-agnostic inference profiles with ONNX model registration, discovery under `/models/yolov8`, `/models/yolov11`, and `/models/yolov26`, per-camera model assignments, hot reload, activation, and benchmark results. See [`docs/model-management.md`](docs/model-management.md).
+## Stack
 
-The backend now includes a single-process intelligence pipeline: ONNX Runtime detection with CUDA/CPU fallback, persistent IoU-based tracking, zone awareness, observation generation, rules, event generation, PostgreSQL storage, generated OpenAPI documentation, and SvelteKit views for observations, tracks, detections, zones, rules, and events. Events are the final output of this phase.
+- **Backend:** Rust, Tokio, Axum, SQLx, Serde, tracing
+- **Database:** PostgreSQL 16
+- **AI:** ONNX Runtime with CUDA preference and CPU fallback; YOLO-compatible ONNX models
+- **Frontend:** SvelteKit, TypeScript, Vite
+- **Media:** RTSP, FFmpeg, continuous recordings, event clips, snapshots
+- **Deployment:** Docker Compose, Debian 13, Ubuntu 24.04+, Proxmox VMs
 
-## API
+## Current capabilities
 
-This repository currently contains the production-oriented foundation:
+- Camera registration, RTSP probing, snapshots, health monitoring, and reconnect backoff
+- ONNX model discovery, registration, activation, per-camera assignment, reload, and benchmarking
+- Detection, IoU tracking, observations, zones, behaviours, identities, anomaly scoring, and rules
+- Events, searchable analytics, recordings, clips, snapshots, notifications, and WebSocket events
+- Local users with Administrator, Operator, and Viewer roles
+- Argon2id password hashing, revocable HttpOnly sessions, SameSite cookies, and CSRF checks for user administration
+- Health, liveness, readiness, metrics, SQLx migrations, Docker restart policy, and graceful shutdown
 
-- Rust Cargo workspace with `common`, `database`, `camera`, and `api` crates.
-- SQLx PostgreSQL connection pool and embedded migrations.
-- Camera schema plus core schemas for models, detections, events, recordings, notification rules, and accounts.
-- Axum health/readiness endpoints and initial camera REST endpoints.
-- Docker Compose environment for PostgreSQL and the API.
-- Architecture documentation in [`docs/architecture.md`](docs/architecture.md).
-
-## Run locally
+## Quick start with Docker Compose
 
 ```bash
-# Start PostgreSQL, then run the API with DATABASE_URL configured in your shell:
-export POSTGRES_PASSWORD='replace-with-a-long-random-password'
-docker compose up -d postgres
-DATABASE_URL="postgres://objexel:${POSTGRES_PASSWORD}@localhost:5432/objexel" cargo run -p objexel-api
+sudo apt update
+sudo apt install -y ca-certificates curl git openssl
+git clone https://github.com/daygle/Objexel.git
+cd Objexel
+mkdir -p models recordings clips snapshots backups
+printf 'POSTGRES_PASSWORD=%s\nOBJEXEL_COOKIE_SECURE=0\n' "$(openssl rand -hex 24)" > .env
+docker compose up -d --build
+curl -fsS http://localhost:8080/liveness
 ```
 
-The API listens on `0.0.0.0:8080` by default. `GET /health` does not require a database; `GET /ready` reports PostgreSQL readiness. SQLx applies all files in `migrations/` at startup. The REST surface is:
+For a network-exposed deployment, terminate HTTPS in a trusted reverse proxy and set `OBJEXEL_COOKIE_SECURE=1`. Do not expose PostgreSQL publicly.
 
-- `GET /health`
-- `GET /ready`
-- `GET /api/cameras`
-- `POST /api/cameras`
-- `GET /api/cameras/:id`
-- `PUT /api/cameras/:id`
-- `DELETE /api/cameras/:id`
-- `POST /api/cameras/:id/test`
-- `POST /api/cameras/:id/snapshot`
-- `GET /api/cameras/:id/status`
-- `GET /api/openapi.json` (generated with `utoipa`)
-- `GET /api/models`
-- `GET /api/models/:id`
-- `POST /api/models`
-- `DELETE /api/models/:id`
-- `POST /api/models/reload`
-- `POST /api/models/:id/activate`
-- `POST /api/models/:id/benchmark`
-- `GET /api/benchmarks`
-- `POST /api/cameras/:id/model/:model_id`
-- `GET /api/detections` and `GET /api/detections/:id`
-- `GET /api/tracks` and `GET /api/tracks/:id`
-- `GET /api/observations` and `GET /api/observations/:id`
-- `GET /api/zones`
-- `GET /api/zones/:id`
-- `POST /api/zones`
-- `PUT /api/zones/:id`
-- `DELETE /api/zones/:id`
-- `GET /api/zone-events`
-- `GET /api/rules`
-- `GET /api/rules/:id`
-- `POST /api/rules`
-- `PUT /api/rules/:id`
-- `DELETE /api/rules/:id`
-- `GET /api/events`
-- `GET /api/events/:id`
+## First run
 
-The `/api/v1/cameras` routes remain available as compatibility aliases. See [`docs/observation-pipeline.md`](docs/observation-pipeline.md), [`docs/spatial-zones.md`](docs/spatial-zones.md), and [`docs/rules-engine.md`](docs/rules-engine.md). Notifications, recordings, and automation actions are intentionally deferred.
+1. Open `http://SERVER:8080/setup`.
+2. Create the first Administrator account with a password of at least 12 characters.
+3. Sign in at `http://SERVER:8080/login`.
+4. Add and test a camera using its RTSP URL.
+5. Copy ONNX files into `models/` (or `/models/yolov8`, `/models/yolov11`, or `/models/yolov26`).
+6. Open **Models**, reload the registry, activate a model, and assign it to a camera.
+7. Verify one detection, one event, and one recording clip before adding more cameras.
 
-Run checks with:
+The setup endpoint rejects new setup attempts after the first user exists. Model files are currently installed manually; the application does not yet download models from an external registry.
+
+## Useful endpoints
+
+- `GET /health` — process health
+- `GET /liveness` — container liveness
+- `GET /readiness` and `GET /ready` — PostgreSQL readiness
+- `GET /metrics` — runtime and camera metrics
+- `GET /api/openapi.json` — generated API description
+- `POST /api/auth/setup` — first Administrator creation
+- `POST /api/auth/login` / `POST /api/auth/logout` / `GET /api/auth/me`
+- `/api/cameras`, `/api/models`, `/api/detections`, `/api/tracks`, `/api/observations`, `/api/events`
+- `/api/behaviours`, `/api/identities`, `/api/intelligence`, `/api/analytics`
+- `/api/recordings`, `/api/clips`, `/api/snapshots`
+
+All application API routes other than health, authentication entry points, and OpenAPI require an authenticated session.
+
+## Repository layout
+
+```text
+crates/                 Rust workspace crates
+  api/ auth/ camera/ database/ detector/ models/ ...
+web/                    SvelteKit frontend
+docker/                 API image definition
+docker-compose.yml      PostgreSQL + API development deployment
+migrations/             SQLx migrations
+docs/                   Architecture and subsystem documentation
+```
+
+## Documentation
+
+### Installation and operations
+
+- [INSTALL.md](INSTALL.md)
+- [OPERATIONS.md](OPERATIONS.md)
+- [BACKUP.md](BACKUP.md)
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+- [UPGRADE.md](UPGRADE.md)
+
+### Architecture
+
+- [docs/architecture.md](docs/architecture.md)
+- [docs/camera-ingestion.md](docs/camera-ingestion.md)
+- [docs/model-management.md](docs/model-management.md)
+- [docs/observation-pipeline.md](docs/observation-pipeline.md)
+- [docs/behaviour.md](docs/behaviour.md)
+- [docs/identity.md](docs/identity.md)
+- [docs/rules-engine.md](docs/rules-engine.md)
+- [docs/spatial-zones.md](docs/spatial-zones.md)
+
+## Development
+
+Required local tools are Rust stable, PostgreSQL 16, FFmpeg, Node.js, and npm.
 
 ```bash
 cargo fmt --all -- --check
-cargo test --workspace
 cargo check --workspace
+cargo test --workspace
+cd web
+npm install
+npm run check
+npm run build
 ```
 
-## Production setup
+Pull requests are expected to pass the Rust, frontend, and Docker checks defined in `.github/workflows/ci.yml`.
 
-See [`INSTALL.md`](INSTALL.md) for Debian 13, Ubuntu 24.04+, Proxmox VM, Docker Compose, CPU-only, and NVIDIA deployment instructions. On first start, open `/setup` to create the administrator account; subsequent setup attempts are rejected once a user exists. Authenticate through `/login`.
+## Production readiness checklist
 
-Authentication uses Argon2id password hashes and revocable, HttpOnly, SameSite session cookies. Administrator user changes require the CSRF token returned by login/setup in the `X-CSRF-Token` header. Set `OBJEXEL_COOKIE_SECURE=1` behind HTTPS; local plain-HTTP development can leave it unset.
+Before calling an installation production-ready, verify:
 
-Operational procedures are documented in [`OPERATIONS.md`](OPERATIONS.md), [`BACKUP.md`](BACKUP.md), [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md), and [`UPGRADE.md`](UPGRADE.md). The Compose deployment keeps PostgreSQL on the internal Compose network; expose it only through an explicit, protected operator override.
+- HTTPS and secure cookies are enabled.
+- The first Administrator has been created and unused setup access is closed.
+- PostgreSQL and media backups have been restored successfully in a test environment.
+- At least one camera, model, detection, event, and clip have been tested.
+- Disk retention and storage monitoring are configured.
+- Upgrade and rollback procedures have been rehearsed.
+- The deployment is restricted to trusted users and networks.
+
+Objexel is not yet a packaged v1.0 release. Treat upgrades, model compatibility, GPU acceleration, and high camera counts as workload-specific until benchmarked on the target hardware.
 
 ## License
 
