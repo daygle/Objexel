@@ -1,5 +1,5 @@
 use anyhow::Context;
-use objexel_common::{Camera, CameraStatus, CreateCamera, CreateZone, Detection, Model, Observation, Track, UpdateCamera, UpdateZone, Zone, ZoneEvent, ZoneEventType};
+use objexel_common::{Camera, CameraStatus, CreateCamera, CreateRule, CreateZone, Detection, Event, EventSeverity, Model, Observation, Rule, RuleCondition, RuleConditionInput, Track, UpdateCamera, UpdateRule, UpdateZone, Zone, ZoneEvent, ZoneEventType};
 use serde_json::Value;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use uuid::Uuid;
@@ -203,6 +203,72 @@ impl Database {
         Ok(())
     }
 
+    pub async fn list_rules(&self) -> anyhow::Result<Vec<Rule>> {
+        let rows = sqlx::query("SELECT id, name, enabled, description, cooldown_seconds, suppression_seconds, severity, created_at, updated_at FROM rules ORDER BY name").fetch_all(&self.pool).await?;
+        let mut rules = Vec::with_capacity(rows.len());
+        for row in rows { rules.push(self.rule_from_row(row).await?); }
+        Ok(rules)
+    }
+
+    pub async fn get_rule(&self, id: Uuid) -> anyhow::Result<Option<Rule>> {
+        let row = sqlx::query("SELECT id, name, enabled, description, cooldown_seconds, suppression_seconds, severity, created_at, updated_at FROM rules WHERE id = $1").bind(id).fetch_optional(&self.pool).await?;
+        match row { Some(row) => Ok(Some(self.rule_from_row(row).await?)), None => Ok(None) }
+    }
+
+    pub async fn create_rule(&self, input: CreateRule) -> anyhow::Result<Rule> {
+        let id = Uuid::new_v4();
+        sqlx::query("INSERT INTO rules (id,name,enabled,description,cooldown_seconds,suppression_seconds,severity) VALUES ($1,$2,$3,$4,$5,$6,$7)")
+            .bind(id).bind(input.name).bind(input.enabled).bind(input.description).bind(input.cooldown_seconds.max(0)).bind(input.suppression_seconds.max(0)).bind(severity_string(&input.severity)).execute(&self.pool).await?;
+        self.replace_rule_conditions(id, input.conditions).await?;
+        self.get_rule(id).await?.context("rule was not returned after insert")
+    }
+
+    pub async fn update_rule(&self, id: Uuid, input: UpdateRule) -> anyhow::Result<Option<Rule>> {
+        let severity = input.severity.as_ref().map(severity_string);
+        let result = sqlx::query("UPDATE rules SET name=COALESCE($2,name), enabled=COALESCE($3,enabled), description=COALESCE($4,description), cooldown_seconds=COALESCE($5,cooldown_seconds), suppression_seconds=COALESCE($6,suppression_seconds), severity=COALESCE($7,severity), updated_at=NOW() WHERE id=$1")
+            .bind(id).bind(input.name).bind(input.enabled).bind(input.description).bind(input.cooldown_seconds.map(|value| value.max(0))).bind(input.suppression_seconds.map(|value| value.max(0))).bind(severity).execute(&self.pool).await?;
+        if result.rows_affected() == 0 { return Ok(None); }
+        if let Some(conditions) = input.conditions { self.replace_rule_conditions(id, conditions).await?; }
+        self.get_rule(id).await
+    }
+
+    async fn replace_rule_conditions(&self, rule_id: Uuid, conditions: Vec<RuleConditionInput>) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM rule_conditions WHERE rule_id=$1").bind(rule_id).execute(&self.pool).await?;
+        for condition in conditions {
+            sqlx::query("INSERT INTO rule_conditions (id,rule_id,object_class,zone_id,observation_type,confidence_threshold,minimum_duration_ms) VALUES ($1,$2,$3,$4,$5,$6,$7)")
+                .bind(Uuid::new_v4()).bind(rule_id).bind(condition.object_class).bind(condition.zone_id).bind(condition.observation_type).bind(condition.confidence_threshold).bind(condition.minimum_duration_ms).execute(&self.pool).await?;
+        }
+        Ok(())
+    }
+
+    async fn rule_from_row(&self, row: sqlx::postgres::PgRow) -> anyhow::Result<Rule> {
+        let id: Uuid = row.try_get("id")?;
+        let condition_rows = sqlx::query("SELECT id,rule_id,object_class,zone_id,observation_type,confidence_threshold,minimum_duration_ms FROM rule_conditions WHERE rule_id=$1").bind(id).fetch_all(&self.pool).await?;
+        let conditions = condition_rows.into_iter().map(condition_from_row).collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(Rule { id, name: row.try_get("name")?, enabled: row.try_get("enabled")?, description: row.try_get("description")?, cooldown_seconds: row.try_get("cooldown_seconds")?, suppression_seconds: row.try_get("suppression_seconds")?, severity: severity_from_string(&row.try_get::<String,_>("severity")?), conditions, created_at: row.try_get("created_at")?, updated_at: row.try_get("updated_at")? })
+    }
+
+    pub async fn delete_rule(&self, id: Uuid) -> anyhow::Result<bool> {
+        let result = sqlx::query("DELETE FROM rules WHERE id=$1").bind(id).execute(&self.pool).await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn list_events(&self, limit: i64) -> anyhow::Result<Vec<Event>> {
+        let rows = sqlx::query("SELECT id,rule_id,camera_id,track_id,observation_id,event_type,summary,severity,created_at FROM events ORDER BY created_at DESC LIMIT $1").bind(limit.clamp(1,500)).fetch_all(&self.pool).await?;
+        rows.into_iter().map(event_from_row).collect()
+    }
+
+    pub async fn get_event(&self, id: Uuid) -> anyhow::Result<Option<Event>> {
+        let row = sqlx::query("SELECT id,rule_id,camera_id,track_id,observation_id,event_type,summary,severity,created_at FROM events WHERE id=$1").bind(id).fetch_optional(&self.pool).await?;
+        row.map(event_from_row).transpose()
+    }
+
+    pub async fn insert_event(&self, event: &Event) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO events (id,rule_id,camera_id,track_id,observation_id,event_type,summary,severity,kind,payload,occurred_at,created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$6,'{}',$9,$9)")
+            .bind(event.id).bind(event.rule_id).bind(event.camera_id).bind(event.track_id).bind(event.observation_id).bind(&event.event_type).bind(&event.summary).bind(severity_string(&event.severity)).bind(event.created_at).execute(&self.pool).await?;
+        Ok(())
+    }
+
     pub async fn delete_camera(&self, id: Uuid) -> anyhow::Result<bool> {
         let result = sqlx::query("DELETE FROM cameras WHERE id = $1")
             .bind(id)
@@ -260,6 +326,11 @@ fn zone_event_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<ZoneEvent> 
 }
 
 fn zone_event_type_string(event_type: &ZoneEventType) -> &'static str { match event_type { ZoneEventType::Entered => "entered", ZoneEventType::Exited => "exited", ZoneEventType::Occupied => "occupied" } }
+
+fn condition_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<RuleCondition> { Ok(RuleCondition { id: row.try_get("id")?, rule_id: row.try_get("rule_id")?, object_class: row.try_get("object_class")?, zone_id: row.try_get("zone_id")?, observation_type: row.try_get("observation_type")?, confidence_threshold: row.try_get("confidence_threshold")?, minimum_duration_ms: row.try_get("minimum_duration_ms")? }) }
+fn severity_string(severity: &EventSeverity) -> &'static str { match severity { EventSeverity::Info => "info", EventSeverity::Warning => "warning", EventSeverity::Critical => "critical" } }
+fn severity_from_string(value: &str) -> EventSeverity { match value { "warning" => EventSeverity::Warning, "critical" => EventSeverity::Critical, _ => EventSeverity::Info } }
+fn event_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Event> { Ok(Event { id: row.try_get("id")?, rule_id: row.try_get::<Option<Uuid>, _>("rule_id")?.unwrap_or_else(Uuid::nil), camera_id: row.try_get("camera_id")?, track_id: row.try_get("track_id")?, observation_id: row.try_get("observation_id")?, event_type: row.try_get("event_type")?, summary: row.try_get("summary")?, severity: severity_from_string(&row.try_get::<String,_>("severity")?), created_at: row.try_get("created_at")? }) }
 
 fn status_string(status: &CameraStatus) -> &'static str {
     match status {

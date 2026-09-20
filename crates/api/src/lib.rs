@@ -8,7 +8,7 @@ use axum::{
 };
 use chrono::Utc;
 use objexel_camera::{CameraManager, CameraService};
-use objexel_common::{Camera, CameraStatus, CameraTestResult, CreateCamera, CreateZone, Detection, HealthResponse, Model, Observation, StreamMetadata, Track, UpdateCamera, UpdateZone, Zone, ZoneEvent};
+use objexel_common::{Camera, CameraStatus, CameraTestResult, CreateCamera, CreateRule, CreateZone, Detection, Event, HealthResponse, Model, Observation, Rule, StreamMetadata, Track, UpdateCamera, UpdateRule, UpdateZone, Zone, ZoneEvent};
 use objexel_detector::ModelConfig;
 use objexel_pipeline::ObservationPipeline;
 use objexel_zones::validate_polygon;
@@ -28,8 +28,8 @@ pub struct AppState {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, list_models, reload_models, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events),
-    components(schemas(Camera, CreateCamera, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent)),
+    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, list_models, reload_models, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
+    components(schemas(Camera, CreateCamera, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
     tags((name = "cameras", description = "Camera management and RTSP ingestion"))
 )]
 pub struct ApiDoc;
@@ -64,6 +64,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/zones", get(list_zones).post(create_zone))
         .route("/api/zones/:id", get(get_zone).put(update_zone).delete(delete_zone))
         .route("/api/zone-events", get(list_zone_events))
+        .route("/api/rules", get(list_rules).post(create_rule))
+        .route("/api/rules/:id", get(get_rule).put(update_rule).delete(delete_rule))
+        .route("/api/events", get(list_events))
+        .route("/api/events/:id", get(get_event))
         .merge(camera_routes)
         .with_state(Arc::new(state))
         .layer(CorsLayer::permissive())
@@ -239,6 +243,36 @@ async fn delete_zone(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -
 async fn list_zone_events(State(state): State<Arc<AppState>>, Query(query): Query<LimitQuery>) -> Result<Json<Vec<ZoneEvent>>, ErrorResponse> {
     database(&state)?.list_zone_events(query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error)
 }
+
+#[utoipa::path(get, path = "/api/rules", tag = "rules", responses((status = 200, body = [Rule]), (status = 503)))]
+async fn list_rules(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Rule>>, ErrorResponse> { database(&state)?.list_rules().await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/rules/{id}", tag = "rules", params(("id" = Uuid, Path)), responses((status = 200, body = Rule), (status = 404), (status = 503)))]
+async fn get_rule(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Rule>, ErrorResponse> { match database(&state)?.get_rule(id).await.map_err(internal_error)? { Some(rule) => Ok(Json(rule)), None => Err(not_found("rule not found")) } }
+
+#[utoipa::path(post, path = "/api/rules", tag = "rules", request_body = CreateRule, responses((status = 201, body = Rule), (status = 400), (status = 503)))]
+async fn create_rule(State(state): State<Arc<AppState>>, Json(input): Json<CreateRule>) -> Result<(StatusCode, Json<Rule>), ErrorResponse> {
+    validate_rule(&input.name, input.cooldown_seconds, input.suppression_seconds)?;
+    database(&state)?.create_rule(input).await.map(|rule| (StatusCode::CREATED, Json(rule))).map_err(internal_error)
+}
+
+#[utoipa::path(put, path = "/api/rules/{id}", tag = "rules", params(("id" = Uuid, Path)), request_body = UpdateRule, responses((status = 200, body = Rule), (status = 400), (status = 404), (status = 503)))]
+async fn update_rule(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>, Json(input): Json<UpdateRule>) -> Result<Json<Rule>, ErrorResponse> {
+    if let Some(name) = &input.name { if name.trim().is_empty() { return Err(bad_request("rule name cannot be empty")); } }
+    if input.cooldown_seconds.is_some_and(|value| value < 0) || input.suppression_seconds.is_some_and(|value| value < 0) { return Err(bad_request("cooldown and suppression cannot be negative")); }
+    match database(&state)?.update_rule(id, input).await.map_err(internal_error)? { Some(rule) => Ok(Json(rule)), None => Err(not_found("rule not found")) }
+}
+
+#[utoipa::path(delete, path = "/api/rules/{id}", tag = "rules", params(("id" = Uuid, Path)), responses((status = 204), (status = 404), (status = 503)))]
+async fn delete_rule(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<StatusCode, ErrorResponse> { if database(&state)?.delete_rule(id).await.map_err(internal_error)? { Ok(StatusCode::NO_CONTENT) } else { Err(not_found("rule not found")) } }
+
+#[utoipa::path(get, path = "/api/events", tag = "events", responses((status = 200, body = [Event]), (status = 503)))]
+async fn list_events(State(state): State<Arc<AppState>>, Query(query): Query<LimitQuery>) -> Result<Json<Vec<Event>>, ErrorResponse> { database(&state)?.list_events(query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/events/{id}", tag = "events", params(("id" = Uuid, Path)), responses((status = 200, body = Event), (status = 404), (status = 503)))]
+async fn get_event(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Event>, ErrorResponse> { match database(&state)?.get_event(id).await.map_err(internal_error)? { Some(event) => Ok(Json(event)), None => Err(not_found("event not found")) } }
+
+fn validate_rule(name: &str, cooldown_seconds: i64, suppression_seconds: i64) -> Result<(), ErrorResponse> { if name.trim().is_empty() { return Err(bad_request("rule name cannot be empty")); } if cooldown_seconds < 0 || suppression_seconds < 0 { return Err(bad_request("cooldown and suppression cannot be negative")); } Ok(()) }
 
 async fn events_socket(ws: WebSocketUpgrade) -> impl axum::response::IntoResponse { ws.on_upgrade(|_socket| async move { tracing::debug!("event websocket connected"); }) }
 async fn openapi() -> Json<utoipa::openapi::OpenApi> { Json(ApiDoc::openapi()) }

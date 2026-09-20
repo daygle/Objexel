@@ -9,6 +9,7 @@ members = [
     "crates/observations",
     "crates/pipeline",
     "crates/zones",
+    "crates/rules",
     "crates/api",
 ]
 

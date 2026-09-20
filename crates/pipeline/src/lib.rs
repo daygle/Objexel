@@ -1,8 +1,9 @@
 use anyhow::Result;
-use objexel_common::{Detection, Observation, Track, ZoneEventType};
+use objexel_common::{Detection, Event, Observation, Track, ZoneEventType};
 use objexel_database::Database;
 use objexel_detector::{FrameTensor, ModelManager};
 use objexel_observations::ObservationEngine;
+use objexel_rules::{ObservationContext, RuleEngine};
 use objexel_tracker::Tracker;
 use objexel_zones::ZoneEvaluator;
 use std::sync::Arc;
@@ -13,13 +14,14 @@ pub struct ObservationPipeline {
     pub models: ModelManager,
     tracker: Arc<Mutex<Tracker>>,
     zones: Arc<Mutex<ZoneEvaluator>>,
+    rules: Arc<Mutex<RuleEngine>>,
     observations: ObservationEngine,
     database: Database,
 }
 
 impl ObservationPipeline {
     pub fn new(database: Database) -> Self {
-        Self { models: ModelManager::default(), tracker: Arc::new(Mutex::new(Tracker::default())), zones: Arc::new(Mutex::new(ZoneEvaluator::default())), observations: ObservationEngine::default(), database }
+        Self { models: ModelManager::default(), tracker: Arc::new(Mutex::new(Tracker::default())), zones: Arc::new(Mutex::new(ZoneEvaluator::default())), rules: Arc::new(Mutex::new(RuleEngine::default())), observations: ObservationEngine::default(), database }
     }
 
     pub async fn process_frame(&self, frame: FrameTensor) -> Result<PipelineResult> {
@@ -44,8 +46,18 @@ impl ObservationPipeline {
             observations.push(Observation { id: uuid::Uuid::new_v4(), camera_id: event.camera_id, track_id: event.track_id, observation_type: observation_type.into(), summary, created_at: event.occurred_at });
         }
         for observation in &observations { self.database.insert_observation(observation).await?; }
-        tracing::debug!(camera_id = %camera_id, detections = detections.len(), tracks = tracks.len(), zone_events = zone_events.len(), observations = observations.len(), "frame processed");
-        Ok(PipelineResult { detections, tracks, observations, zone_events })
+        let rules = self.database.list_rules().await?;
+        let mut events = Vec::new();
+        let mut rule_engine = self.rules.lock().await;
+        for observation in &observations {
+            let track = tracks.iter().find(|track| track.id == observation.track_id);
+            let detection = detections.iter().find(|detection| detection.track_id == Some(observation.track_id));
+            let zone_id = zone_events.iter().find(|event| event.track_id == observation.track_id).map(|event| event.zone_id);
+            let context = ObservationContext { observation, object_class: track.map(|track| track.object_class.as_str()), zone_id, confidence: detection.map(|detection| detection.confidence), duration_ms: track.map(|track| track.duration_ms) };
+            for event in rule_engine.evaluate(&rules, context, now) { self.database.insert_event(&event).await?; events.push(event); }
+        }
+        tracing::debug!(camera_id = %camera_id, detections = detections.len(), tracks = tracks.len(), zone_events = zone_events.len(), observations = observations.len(), events = events.len(), "frame processed");
+        Ok(PipelineResult { detections, tracks, observations, zone_events, events })
     }
 }
 
@@ -55,13 +67,14 @@ pub struct PipelineResult {
     pub tracks: Vec<Track>,
     pub observations: Vec<Observation>,
     pub zone_events: Vec<objexel_common::ZoneEvent>,
+    pub events: Vec<Event>,
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn pipeline_has_explicit_spatial_stages() {
-        let stages = ["frame_extraction", "detection", "tracking", "zone_evaluation", "observation", "storage"];
-        assert_eq!(stages.len(), 6);
+    fn pipeline_has_explicit_rule_stage() {
+        let stages = ["frame_extraction", "detection", "tracking", "zone_evaluation", "observation", "rules", "events", "storage"];
+        assert_eq!(stages.len(), 8);
     }
 }

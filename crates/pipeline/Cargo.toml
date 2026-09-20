@@ -11,6 +11,7 @@ objexel-common = { path = "../common" }
 objexel-database = { path = "../database" }
 objexel-detector = { path = "../detector" }
 objexel-observations = { path = "../observations" }
+objexel-rules = { path = "../rules" }
 objexel-tracker = { path = "../tracker" }
 objexel-zones = { path = "../zones" }
 tokio.workspace = true

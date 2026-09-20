@@ -15,6 +15,10 @@ impl Default for CameraStatus {
     fn default() -> Self { Self::Unknown }
 }
 
+impl Default for EventSeverity {
+    fn default() -> Self { Self::Info }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Camera {
     pub id: Uuid,
@@ -165,6 +169,84 @@ pub struct ZoneEvent {
     pub event_type: ZoneEventType,
     pub occurred_at: DateTime<Utc>,
     pub duration_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EventSeverity { Info, Warning, Critical }
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct RuleCondition {
+    pub id: Uuid,
+    pub rule_id: Uuid,
+    pub object_class: Option<String>,
+    pub zone_id: Option<Uuid>,
+    pub observation_type: Option<String>,
+    pub confidence_threshold: Option<f32>,
+    pub minimum_duration_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Rule {
+    pub id: Uuid,
+    pub name: String,
+    pub enabled: bool,
+    pub description: String,
+    pub cooldown_seconds: i64,
+    pub suppression_seconds: i64,
+    pub severity: EventSeverity,
+    pub conditions: Vec<RuleCondition>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CreateRule {
+    pub name: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub cooldown_seconds: i64,
+    #[serde(default)]
+    pub suppression_seconds: i64,
+    #[serde(default)]
+    pub severity: EventSeverity,
+    pub conditions: Vec<RuleConditionInput>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct RuleConditionInput {
+    pub object_class: Option<String>,
+    pub zone_id: Option<Uuid>,
+    pub observation_type: Option<String>,
+    pub confidence_threshold: Option<f32>,
+    pub minimum_duration_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct UpdateRule {
+    pub name: Option<String>,
+    pub enabled: Option<bool>,
+    pub description: Option<String>,
+    pub cooldown_seconds: Option<i64>,
+    pub suppression_seconds: Option<i64>,
+    pub severity: Option<EventSeverity>,
+    pub conditions: Option<Vec<RuleConditionInput>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Event {
+    pub id: Uuid,
+    pub rule_id: Uuid,
+    pub camera_id: Uuid,
+    pub track_id: Option<Uuid>,
+    pub observation_id: Option<Uuid>,
+    pub event_type: String,
+    pub summary: String,
+    pub severity: EventSeverity,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]

@@ -7,7 +7,8 @@ Objexel establishes a Rust workspace with clear service boundaries, a PostgreSQL
 - `common`: serializable domain types shared by services.
 - `database`: SQLx pool, embedded migrations, and camera persistence.
 - `camera`: Tokio-based RTSP probe/snapshot service backed by system FFmpeg binaries, with bounded commands and reconnect backoff.
-- `api`: Axum HTTP boundary, readiness checks, complete camera CRUD endpoints, generated OpenAPI documentation, and the event WebSocket boundary.
+- `api`: Axum HTTP boundary, readiness checks, camera/zone/rule CRUD endpoints, generated OpenAPI documentation, and the event WebSocket boundary.
+- `detector`, `tracker`, `observations`, `zones`, `rules`, `pipeline`: in-process intelligence stages from frames to final events.
 
 The API is intentionally stateless. PostgreSQL is the source of truth; future workers will communicate through Tokio channels and publish events over WebSockets without coupling media processing to HTTP handlers.
 
@@ -33,5 +34,5 @@ RTSP cameras -> camera worker -> detector/tracker workers -> event engine
 
 ## Roadmap
 
-- **Phase 6:** event rules and richer WebSocket observation events.
-- **Phase 7:** recordings, retention, notifications, authentication, and production deployment manifests.
+- **Phase 7:** richer WebSocket event streams and authentication.
+- **Phase 8:** recordings, retention, notifications, and production deployment manifests.

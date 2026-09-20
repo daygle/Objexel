@@ -2,9 +2,9 @@
 
 Self-hosted, Linux-first AI camera analytics for home servers and Proxmox. Objexel is being built incrementally as a Rust backend with a SvelteKit frontend, ONNX Runtime inference, RTSP/FFmpeg media handling, and PostgreSQL persistence.
 
-## Phase 4
+## Phase 6
 
-The backend now includes a single-process frame-to-observation pipeline: ONNX Runtime detection with CUDA/CPU fallback, persistent IoU-based tracking, observation generation, PostgreSQL storage, generated OpenAPI documentation, and SvelteKit views for observations, tracks, and detections.
+The backend now includes a single-process intelligence pipeline: ONNX Runtime detection with CUDA/CPU fallback, persistent IoU-based tracking, zone awareness, observation generation, rules, event generation, PostgreSQL storage, generated OpenAPI documentation, and SvelteKit views for observations, tracks, detections, zones, rules, and events. Events are the final output of this phase.
 
 ## API
 
@@ -49,8 +49,15 @@ The API listens on `0.0.0.0:8080` by default. `GET /health` does not require a d
 - `PUT /api/zones/:id`
 - `DELETE /api/zones/:id`
 - `GET /api/zone-events`
+- `GET /api/rules`
+- `GET /api/rules/:id`
+- `POST /api/rules`
+- `PUT /api/rules/:id`
+- `DELETE /api/rules/:id`
+- `GET /api/events`
+- `GET /api/events/:id`
 
-The `/api/v1/cameras` routes remain available as compatibility aliases. See [`docs/observation-pipeline.md`](docs/observation-pipeline.md) and [`docs/spatial-zones.md`](docs/spatial-zones.md) for pipeline and spatial architecture.
+The `/api/v1/cameras` routes remain available as compatibility aliases. See [`docs/observation-pipeline.md`](docs/observation-pipeline.md), [`docs/spatial-zones.md`](docs/spatial-zones.md), and [`docs/rules-engine.md`](docs/rules-engine.md). Notifications, recordings, and automation actions are intentionally deferred.
 
 Run checks with:
 
