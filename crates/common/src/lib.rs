@@ -233,6 +233,8 @@ pub struct Rule {
     pub suppression_seconds: i64,
     pub severity: EventSeverity,
     pub conditions: Vec<RuleCondition>,
+    #[serde(default)]
+    pub action_ids: Vec<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -251,6 +253,8 @@ pub struct CreateRule {
     #[serde(default)]
     pub severity: EventSeverity,
     pub conditions: Vec<RuleConditionInput>,
+    #[serde(default)]
+    pub action_ids: Vec<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -271,6 +275,7 @@ pub struct UpdateRule {
     pub suppression_seconds: Option<i64>,
     pub severity: Option<EventSeverity>,
     pub conditions: Option<Vec<RuleConditionInput>>,
+    pub action_ids: Option<Vec<Uuid>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -286,7 +291,106 @@ pub struct Event {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct NotificationProvider {
+    pub id: Uuid,
+    pub provider_type: String,
+    pub enabled: bool,
+    pub configuration: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct NotificationTemplate {
+    pub id: Uuid,
+    pub name: String,
+    pub subject: String,
+    pub body: String,
+    pub html: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Action {
+    pub id: Uuid,
+    pub name: String,
+    pub action_type: String,
+    pub provider_id: Option<Uuid>,
+    pub template_id: Option<Uuid>,
+    pub enabled: bool,
+    pub configuration: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CreateAction {
+    pub name: String,
+    pub action_type: String,
+    pub provider_id: Option<Uuid>,
+    pub template_id: Option<Uuid>,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub configuration: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct UpdateAction {
+    pub name: Option<String>,
+    pub provider_id: Option<Uuid>,
+    pub template_id: Option<Uuid>,
+    pub enabled: Option<bool>,
+    pub configuration: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ActionExecution {
+    pub id: Uuid,
+    pub action_id: Uuid,
+    pub event_id: Uuid,
+    pub status: String,
+    pub execution_time_ms: Option<i64>,
+    pub error_message: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Notification {
+    pub id: Uuid,
+    pub event_id: Option<Uuid>,
+    pub title: String,
+    pub body: String,
+    pub read: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CreateNotificationProvider {
+    pub provider_type: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub configuration: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct UpdateNotificationProvider {
+    pub enabled: Option<bool>,
+    pub configuration: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CreateNotificationTemplate {
+    pub name: String,
+    #[serde(default)]
+    pub subject: String,
+    pub body: String,
+    #[serde(default)]
+    pub html: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct HealthResponse {
     pub status: String,
     pub service: String,

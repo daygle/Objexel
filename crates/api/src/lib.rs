@@ -7,8 +7,9 @@ use axum::{
     Json, Router,
 };
 use chrono::Utc;
+use objexel_actions::ActionDispatcher;
 use objexel_camera::{CameraManager, CameraService};
-use objexel_common::{BenchmarkResult, Camera, CameraStatus, CameraTestResult, CreateCamera, CreateModel, CreateRule, CreateZone, Detection, Event, HealthResponse, Model, Observation, Rule, StreamMetadata, Track, UpdateCamera, UpdateRule, UpdateZone, Zone, ZoneEvent};
+use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, CameraTestResult, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, UpdateNotificationProvider, CreateZone, Detection, Event, HealthResponse, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Rule, StreamMetadata, Track, UpdateAction, UpdateCamera, UpdateRule, UpdateZone, Zone, ZoneEvent};
 use objexel_pipeline::ObservationPipeline;
 use objexel_models::ModelRegistry;
 use objexel_zones::validate_polygon;
@@ -28,8 +29,8 @@ pub struct AppState {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
-    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, BenchmarkResult, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
+    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, list_templates, create_template, test_notification, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
+    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
     tags((name = "cameras", description = "Camera management and RTSP ingestion"))
 )]
 pub struct ApiDoc;
@@ -61,6 +62,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/models/:id/activate", axum::routing::post(activate_model))
         .route("/api/models/:id/benchmark", axum::routing::post(benchmark_model))
         .route("/api/benchmarks", get(list_benchmarks))
+        .route("/api/actions", get(list_actions).post(create_action))
+        .route("/api/actions/:id", get(get_action).put(update_action).delete(delete_action))
+        .route("/api/action-executions", get(list_executions))
+        .route("/api/notifications", get(list_notifications))
+        .route("/api/notification-providers", get(list_providers).post(create_provider))
+        .route("/api/notification-providers/:id", axum::routing::put(update_provider))
+        .route("/api/notification-templates", get(list_templates).post(create_template))
+        .route("/api/test-notification", axum::routing::post(test_notification))
         .route("/api/detections", get(list_detections))
         .route("/api/detections/:id", get(get_detection))
         .route("/api/tracks", get(list_tracks))
@@ -211,6 +220,60 @@ async fn benchmark_model(State(state): State<Arc<AppState>>, Path(id): Path<Uuid
 
 #[utoipa::path(get, path = "/api/benchmarks", tag = "models", responses((status = 200, body = [BenchmarkResult]), (status = 503)))]
 async fn list_benchmarks(State(state): State<Arc<AppState>>) -> Result<Json<Vec<BenchmarkResult>>, ErrorResponse> { database(&state)?.list_benchmarks(None).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/actions", tag = "notifications", responses((status = 200, body = [Action]), (status = 503)))]
+async fn list_actions(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Action>>, ErrorResponse> { database(&state)?.list_actions().await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/actions/{id}", tag = "notifications", params(("id" = Uuid, Path)), responses((status = 200, body = Action), (status = 404), (status = 503)))]
+async fn get_action(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Action>, ErrorResponse> { match database(&state)?.get_action(id).await.map_err(internal_error)? { Some(action) => Ok(Json(action)), None => Err(not_found("action not found")) } }
+
+#[utoipa::path(post, path = "/api/actions", tag = "notifications", request_body = CreateAction, responses((status = 201, body = Action), (status = 400), (status = 503)))]
+async fn create_action(State(state): State<Arc<AppState>>, Json(input): Json<CreateAction>) -> Result<(StatusCode, Json<Action>), ErrorResponse> {
+    if input.name.trim().is_empty() { return Err(bad_request("action name cannot be empty")); }
+    database(&state)?.create_action(input).await.map(|action| (StatusCode::CREATED, Json(action))).map_err(internal_error)
+}
+
+#[utoipa::path(put, path = "/api/actions/{id}", tag = "notifications", params(("id" = Uuid, Path)), request_body = UpdateAction, responses((status = 200, body = Action), (status = 404), (status = 503)))]
+async fn update_action(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>, Json(input): Json<UpdateAction>) -> Result<Json<Action>, ErrorResponse> { match database(&state)?.update_action(id, input).await.map_err(internal_error)? { Some(action) => Ok(Json(action)), None => Err(not_found("action not found")) } }
+
+#[utoipa::path(delete, path = "/api/actions/{id}", tag = "notifications", params(("id" = Uuid, Path)), responses((status = 204), (status = 404), (status = 503)))]
+async fn delete_action(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<StatusCode, ErrorResponse> { if database(&state)?.delete_action(id).await.map_err(internal_error)? { Ok(StatusCode::NO_CONTENT) } else { Err(not_found("action not found")) } }
+
+#[utoipa::path(get, path = "/api/action-executions", tag = "notifications", responses((status = 200, body = [ActionExecution]), (status = 503)))]
+async fn list_executions(State(state): State<Arc<AppState>>, Query(query): Query<LimitQuery>) -> Result<Json<Vec<ActionExecution>>, ErrorResponse> { database(&state)?.list_executions(query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/notifications", tag = "notifications", responses((status = 200, body = [Notification]), (status = 503)))]
+async fn list_notifications(State(state): State<Arc<AppState>>, Query(query): Query<LimitQuery>) -> Result<Json<Vec<Notification>>, ErrorResponse> { database(&state)?.list_notifications(query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/notification-providers", tag = "notifications", responses((status = 200, body = [NotificationProvider]), (status = 503)))]
+async fn list_providers(State(state): State<Arc<AppState>>) -> Result<Json<Vec<NotificationProvider>>, ErrorResponse> { database(&state)?.list_providers().await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(post, path = "/api/notification-providers", tag = "notifications", request_body = CreateNotificationProvider, responses((status = 201, body = NotificationProvider), (status = 503)))]
+async fn create_provider(State(state): State<Arc<AppState>>, Json(input): Json<CreateNotificationProvider>) -> Result<(StatusCode, Json<NotificationProvider>), ErrorResponse> { database(&state)?.create_provider(input).await.map(|provider| (StatusCode::CREATED, Json(provider))).map_err(internal_error) }
+
+#[utoipa::path(put, path = "/api/notification-providers/{id}", tag = "notifications", params(("id" = Uuid, Path)), request_body = UpdateNotificationProvider, responses((status = 200, body = NotificationProvider), (status = 404), (status = 503)))]
+async fn update_provider(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>, Json(input): Json<UpdateNotificationProvider>) -> Result<Json<NotificationProvider>, ErrorResponse> { match database(&state)?.update_provider(id, input).await.map_err(internal_error)? { Some(provider) => Ok(Json(provider)), None => Err(not_found("provider not found")) } }
+
+#[utoipa::path(get, path = "/api/notification-templates", tag = "notifications", responses((status = 200, body = [NotificationTemplate]), (status = 503)))]
+async fn list_templates(State(state): State<Arc<AppState>>) -> Result<Json<Vec<NotificationTemplate>>, ErrorResponse> { database(&state)?.list_templates().await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(post, path = "/api/notification-templates", tag = "notifications", request_body = CreateNotificationTemplate, responses((status = 201, body = NotificationTemplate), (status = 503)))]
+async fn create_template(State(state): State<Arc<AppState>>, Json(input): Json<CreateNotificationTemplate>) -> Result<(StatusCode, Json<NotificationTemplate>), ErrorResponse> { database(&state)?.create_template(input).await.map(|template| (StatusCode::CREATED, Json(template))).map_err(internal_error) }
+
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+struct TestNotification { provider_id: Uuid, template_id: Option<Uuid> }
+
+#[utoipa::path(post, path = "/api/test-notification", tag = "notifications", request_body = TestNotification, responses((status = 200), (status = 400), (status = 503)))]
+async fn test_notification(State(state): State<Arc<AppState>>, Json(input): Json<TestNotification>) -> Result<Json<Value>, ErrorResponse> {
+    let database = database(&state)?;
+    let provider = database.provider(input.provider_id).await.map_err(internal_error)?.ok_or_else(|| not_found("provider not found"))?;
+    let template = match input.template_id { Some(id) => database.template(id).await.map_err(internal_error)?, None => None };
+    let event = Event { id: Uuid::new_v4(), rule_id: Uuid::nil(), camera_id: Uuid::nil(), track_id: None, observation_id: None, event_type: "test_notification".into(), summary: "Objexel test notification".into(), severity: objexel_common::EventSeverity::Info, created_at: Utc::now() };
+    let execution = ActionDispatcher::new().execute(&Action { id: Uuid::new_v4(), name: "test notification".into(), action_type: provider.provider_type.clone(), provider_id: Some(provider.id), template_id: input.template_id, enabled: true, configuration: serde_json::json!({}), created_at: Utc::now(), updated_at: Utc::now() }, Some(&provider), template.as_ref(), &event).await;
+    let success = execution.status == "success";
+    if !success { return Err(bad_request(&execution.error_message.unwrap_or_else(|| "notification failed".into()))); }
+    Ok(Json(json!({"status":"sent"})))
+}
 
 #[utoipa::path(post, path = "/api/models/reload", tag = "models", responses((status = 200), (status = 400), (status = 503)))]
 async fn reload_models(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ErrorResponse> {

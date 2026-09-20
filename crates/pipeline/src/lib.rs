@@ -1,4 +1,5 @@
 use anyhow::Result;
+use objexel_actions::ActionDispatcher;
 use objexel_common::{Detection, Event, Observation, Track, ZoneEventType};
 use objexel_database::Database;
 use objexel_detector::{FrameTensor, ModelManager};
@@ -15,13 +16,14 @@ pub struct ObservationPipeline {
     tracker: Arc<Mutex<Tracker>>,
     zones: Arc<Mutex<ZoneEvaluator>>,
     rules: Arc<Mutex<RuleEngine>>,
+    actions: ActionDispatcher,
     observations: ObservationEngine,
     database: Database,
 }
 
 impl ObservationPipeline {
     pub fn new(database: Database) -> Self {
-        Self { models: ModelManager::default(), tracker: Arc::new(Mutex::new(Tracker::default())), zones: Arc::new(Mutex::new(ZoneEvaluator::default())), rules: Arc::new(Mutex::new(RuleEngine::default())), observations: ObservationEngine::default(), database }
+        Self { models: ModelManager::default(), tracker: Arc::new(Mutex::new(Tracker::default())), zones: Arc::new(Mutex::new(ZoneEvaluator::default())), rules: Arc::new(Mutex::new(RuleEngine::default())), actions: ActionDispatcher::new(), observations: ObservationEngine::default(), database }
     }
 
     pub async fn process_frame(&self, frame: FrameTensor) -> Result<PipelineResult> {
@@ -55,7 +57,18 @@ impl ObservationPipeline {
             let detection = detections.iter().find(|detection| detection.track_id == Some(observation.track_id));
             let zone_id = zone_events.iter().find(|event| event.track_id == observation.track_id).map(|event| event.zone_id);
             let context = ObservationContext { observation, object_class: track.map(|track| track.object_class.as_str()), zone_id, confidence: detection.map(|detection| detection.confidence), duration_ms: track.map(|track| track.duration_ms) };
-            for event in rule_engine.evaluate(&rules, context, now) { self.database.insert_event(&event).await?; events.push(event); }
+            for event in rule_engine.evaluate(&rules, context, now) {
+                self.database.insert_event(&event).await?;
+                self.database.insert_notification(&event).await?;
+                let actions = self.database.actions_for_rule(event.rule_id).await?;
+                for action in actions {
+                    let provider = match action.provider_id { Some(id) => self.database.provider(id).await?, None => None };
+                    let template = match action.template_id { Some(id) => self.database.template(id).await?, None => None };
+                    let execution = self.actions.execute(&action, provider.as_ref(), template.as_ref(), &event).await;
+                    self.database.insert_execution(&execution).await?;
+                }
+                events.push(event);
+            }
         }
         tracing::debug!(camera_id = %camera_id, detections = detections.len(), tracks = tracks.len(), zone_events = zone_events.len(), observations = observations.len(), events = events.len(), "frame processed");
         Ok(PipelineResult { detections, tracks, observations, zone_events, events })

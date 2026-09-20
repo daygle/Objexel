@@ -8,6 +8,7 @@ license.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 axum.workspace = true
+objexel-actions = { path = "../actions" }
 objexel-camera = { path = "../camera" }
 objexel-common = { path = "../common" }
 objexel-database = { path = "../database" }

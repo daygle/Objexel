@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+objexel-actions = { path = "../actions" }
 chrono.workspace = true
 objexel-common = { path = "../common" }
 objexel-database = { path = "../database" }
