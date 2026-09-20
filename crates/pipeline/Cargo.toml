@@ -9,6 +9,7 @@ anyhow.workspace = true
 objexel-actions = { path = "../actions" }
 objexel-behaviour = { path = "../behaviour" }
 objexel-identity = { path = "../identity" }
+objexel-adaptive = { path = "../adaptive" }
 objexel-fusion = { path = "../fusion" }
 chrono.workspace = true
 objexel-common = { path = "../common" }

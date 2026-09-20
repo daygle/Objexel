@@ -1,5 +1,6 @@
 use anyhow::Result;
 use objexel_actions::ActionDispatcher;
+use objexel_adaptive::assess;
 use objexel_behaviour::BehaviourAnalyzer;
 use objexel_common::{Detection, Event, FusionResult, Observation, Track, ZoneEventType};
 use objexel_fusion::FusionEngine;
@@ -84,9 +85,12 @@ impl ObservationPipeline {
             let zone_id = zone_events.iter().find(|event| event.track_id == observation.track_id).map(|event| event.zone_id);
             let behaviour_type = behaviours.iter().find(|behaviour| behaviour.track_id == observation.track_id).map(|behaviour| behaviour.behaviour_type.as_str());
             let identity = match track { Some(track) => Some(self.database.assign_identity(track).await?), None => None };
-            let context = ObservationContext { observation, object_class: track.map(|track| track.object_class.as_str()), zone_id, confidence: detection.map(|detection| detection.confidence), duration_ms: track.map(|track| track.duration_ms), behaviour_type, identity_id: identity.as_ref().map(|item| item.id), familiarity: identity.as_ref().map(|item| item.familiarity.as_str()) };
+            let behaviour = track.and_then(|item| behaviours.iter().find(|candidate| candidate.track_id == item.id));
+            let assessment = identity.as_ref().map(|item| assess(item, behaviour, detection.map(|item| item.confidence).unwrap_or(0.0)));
+            let context = ObservationContext { observation, object_class: track.map(|track| track.object_class.as_str()), zone_id, confidence: detection.map(|detection| detection.confidence), duration_ms: track.map(|track| track.duration_ms), behaviour_type, identity_id: identity.as_ref().map(|item| item.id), familiarity: identity.as_ref().map(|item| item.familiarity.as_str()), priority: assessment.as_ref().map(|item| item.priority.as_str()), anomaly_score: assessment.as_ref().map(|item| item.anomaly_score) };
             for event in rule_engine.evaluate(&rules, context, now) {
                 self.database.insert_event(&event).await?;
+                if let (Some(identity), Some(assessment)) = (identity.as_ref(), assessment.as_ref()) { self.database.insert_adaptive_scores(identity.id, behaviour.map(|item| item.id), assessment, Some(event.id)).await?; }
                 self.database.insert_notification(&event).await?;
                 if let Some(camera) = self.database.get_camera(event.camera_id).await? {
                     let recorder = self.recorder.clone();

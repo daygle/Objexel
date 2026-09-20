@@ -20,6 +20,7 @@ members = [
     "crates/behaviour",
     "crates/fusion",
     "crates/identity",
+    "crates/adaptive",
     "crates/api",
 ]
 

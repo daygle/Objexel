@@ -12,6 +12,7 @@ objexel-actions = { path = "../actions" }
 objexel-analytics = { path = "../analytics" }
 objexel-behaviour = { path = "../behaviour" }
 objexel-identity = { path = "../identity" }
+objexel-adaptive = { path = "../adaptive" }
 objexel-camera = { path = "../camera" }
 objexel-common = { path = "../common" }
 objexel-database = { path = "../database" }

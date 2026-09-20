@@ -304,6 +304,8 @@ pub struct RuleConditionInput {
     pub familiarity: Option<String>,
     pub confidence_threshold: Option<f32>,
     pub minimum_duration_ms: Option<i64>,
+    pub minimum_priority: Option<String>,
+    pub minimum_anomaly_score: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -508,6 +510,44 @@ pub struct IdentityStatistics {
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct UpdateIdentity {
     pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IdentityScore {
+    pub id: Uuid,
+    pub identity_id: Uuid,
+    pub familiarity_score: f32,
+    pub confidence: f32,
+    pub scored_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct BehaviourScore {
+    pub id: Uuid,
+    pub behaviour_id: Uuid,
+    pub anomaly_score: f32,
+    pub behaviour_level: String,
+    pub confidence: f32,
+    pub scored_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct AnomalyEvent {
+    pub id: Uuid,
+    pub event_id: Option<Uuid>,
+    pub identity_id: Option<Uuid>,
+    pub behaviour_id: Option<Uuid>,
+    pub anomaly_score: f32,
+    pub priority_score: f32,
+    pub priority: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct IntelligenceSummary {
+    pub identities: Vec<Identity>,
+    pub anomalies: Vec<AnomalyEvent>,
+    pub highest_priority: Vec<AnomalyEvent>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]

@@ -1,5 +1,6 @@
 use anyhow::Context;
 use objexel_analytics::{AnalyticsMetric, AnalyticsSnapshot, AnalyticsSummary};
+use objexel_adaptive::AdaptiveAssessment;
 use objexel_behaviour::Behaviour;
 use objexel_identity::{familiarity, new_identity, score, similarity, signature, ObjectSignature};
 use objexel_common::{CreateModelAssignment, FusionResult, Identity, IdentityObservation, IdentityStatistics, ModelAssignment, UpdateIdentity};
@@ -322,15 +323,15 @@ impl Database {
     async fn replace_rule_conditions(&self, rule_id: Uuid, conditions: Vec<RuleConditionInput>) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM rule_conditions WHERE rule_id=$1").bind(rule_id).execute(&self.pool).await?;
         for condition in conditions {
-            sqlx::query("INSERT INTO rule_conditions (id,rule_id,object_class,zone_id,observation_type,behaviour_type,identity_id,familiarity,confidence_threshold,minimum_duration_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
-                .bind(Uuid::new_v4()).bind(rule_id).bind(condition.object_class).bind(condition.zone_id).bind(condition.observation_type).bind(condition.behaviour_type).bind(condition.identity_id).bind(condition.familiarity).bind(condition.confidence_threshold).bind(condition.minimum_duration_ms).execute(&self.pool).await?;
+            sqlx::query("INSERT INTO rule_conditions (id,rule_id,object_class,zone_id,observation_type,behaviour_type,identity_id,familiarity,confidence_threshold,minimum_duration_ms,minimum_priority,minimum_anomaly_score) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)")
+                .bind(Uuid::new_v4()).bind(rule_id).bind(condition.object_class).bind(condition.zone_id).bind(condition.observation_type).bind(condition.behaviour_type).bind(condition.identity_id).bind(condition.familiarity).bind(condition.confidence_threshold).bind(condition.minimum_duration_ms).bind(condition.minimum_priority).bind(condition.minimum_anomaly_score).execute(&self.pool).await?;
         }
         Ok(())
     }
 
     async fn rule_from_row(&self, row: sqlx::postgres::PgRow) -> anyhow::Result<Rule> {
         let id: Uuid = row.try_get("id")?;
-        let condition_rows = sqlx::query("SELECT id,rule_id,object_class,zone_id,observation_type,behaviour_type,identity_id,familiarity,confidence_threshold,minimum_duration_ms FROM rule_conditions WHERE rule_id=$1").bind(id).fetch_all(&self.pool).await?;
+        let condition_rows = sqlx::query("SELECT id,rule_id,object_class,zone_id,observation_type,behaviour_type,identity_id,familiarity,confidence_threshold,minimum_duration_ms,minimum_priority,minimum_anomaly_score FROM rule_conditions WHERE rule_id=$1").bind(id).fetch_all(&self.pool).await?;
         let conditions = condition_rows.into_iter().map(condition_from_row).collect::<anyhow::Result<Vec<_>>>()?;
         let action_rows = sqlx::query("SELECT action_id FROM rule_actions WHERE rule_id=$1").bind(id).fetch_all(&self.pool).await?;
         let action_ids = action_rows.into_iter().map(|action| action.try_get("action_id")).collect::<Result<Vec<Uuid>, _>>()?;
@@ -615,6 +616,20 @@ impl Database {
         sqlx::query("INSERT INTO identity_observations (identity_id,track_id,camera_id,similarity,observed_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (identity_id,track_id) DO NOTHING").bind(identity.id).bind(track.id).bind(track.camera_id).bind(match_score.max(1.0)).bind(track.last_seen).execute(&self.pool).await?;
         sqlx::query("INSERT INTO identity_statistics (identity_id,average_duration_ms,active_days) VALUES ($1,$2,1) ON CONFLICT (identity_id) DO UPDATE SET average_duration_ms=((identity_statistics.average_duration_ms + EXCLUDED.average_duration_ms)/2),active_days=identity_statistics.active_days+1").bind(identity.id).bind(track.duration_ms).execute(&self.pool).await?;
         Ok(identity)
+    }
+
+    pub async fn insert_adaptive_scores(&self, identity_id: Uuid, behaviour_id: Option<Uuid>, assessment: &AdaptiveAssessment, event_id: Option<Uuid>) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO identity_scores (identity_id,familiarity_score,confidence) VALUES ($1,$2,$3)").bind(identity_id).bind(assessment.familiarity_score).bind(assessment.familiarity_score).execute(&self.pool).await?;
+        if let Some(behaviour_id) = behaviour_id {
+            sqlx::query("INSERT INTO behaviour_scores (behaviour_id,anomaly_score,behaviour_level,confidence) VALUES ($1,$2,$3,$4)").bind(behaviour_id).bind(assessment.anomaly_score).bind(assessment.behaviour_level).bind(assessment.priority_score).execute(&self.pool).await?;
+        }
+        sqlx::query("INSERT INTO anomaly_events (event_id,identity_id,behaviour_id,anomaly_score,priority_score,priority) VALUES ($1,$2,$3,$4,$5,$6)").bind(event_id).bind(identity_id).bind(behaviour_id).bind(assessment.anomaly_score).bind(assessment.priority_score).bind(assessment.priority.as_str()).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn list_anomalies(&self, limit: i64) -> anyhow::Result<Vec<objexel_common::AnomalyEvent>> {
+        let rows = sqlx::query("SELECT id,event_id,identity_id,behaviour_id,anomaly_score,priority_score,priority,created_at FROM anomaly_events ORDER BY priority_score DESC,created_at DESC LIMIT $1").bind(limit.clamp(1,500)).fetch_all(&self.pool).await?;
+        rows.into_iter().map(|row| Ok(objexel_common::AnomalyEvent { id: row.try_get("id")?, event_id: row.try_get("event_id")?, identity_id: row.try_get("identity_id")?, behaviour_id: row.try_get("behaviour_id")?, anomaly_score: row.try_get("anomaly_score")?, priority_score: row.try_get("priority_score")?, priority: row.try_get("priority")?, created_at: row.try_get("created_at")? })).collect()
     }
 
     pub async fn delete_camera(&self, id: Uuid) -> anyhow::Result<bool> {

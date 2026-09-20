@@ -9,7 +9,7 @@ use axum::{
 use chrono::Utc;
 use objexel_actions::ActionDispatcher;
 use objexel_analytics::AnalyticsSummary;
-use objexel_common::{Behaviour, CreateModelAssignment, FusionResult, Identity, IdentityObservation, IdentityStatistics, ModelAssignment, UpdateIdentity};
+use objexel_common::{AnomalyEvent, Behaviour, BehaviourScore, CreateModelAssignment, IdentityScore, FusionResult, Identity, IdentityObservation, IdentityStatistics, IntelligenceSummary, ModelAssignment, UpdateIdentity};
 use objexel_camera::{CameraManager, CameraService};
 use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, CameraTestResult, Clip, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, Detection, Event, HealthResponse, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, Snapshot, StreamMetadata, Track, UpdateAction, UpdateCamera, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent};
 use objexel_pipeline::ObservationPipeline;
@@ -36,8 +36,8 @@ pub struct AppState {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, list_templates, create_template, test_notification, global_search, search_events, search_observations, search_tracks, search_recordings, search_detections, search_behaviours, list_behaviours, get_behaviour, list_identities, get_identity, update_identity, identity_history, list_fusion, list_model_assignments, create_model_assignment, analytics_summary, analytics_cameras, analytics_zones, analytics_models, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
-    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Recording, Clip, Snapshot, SearchResult, AnalyticsSummary, Behaviour, Identity, IdentityObservation, IdentityStatistics, UpdateIdentity, ModelAssignment, CreateModelAssignment, FusionResult, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
+    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, list_templates, create_template, test_notification, global_search, search_events, search_observations, search_tracks, search_recordings, search_detections, search_behaviours, list_behaviours, get_behaviour, list_identities, get_identity, update_identity, identity_history, intelligence_summary, list_anomalies, list_fusion, list_model_assignments, create_model_assignment, analytics_summary, analytics_cameras, analytics_zones, analytics_models, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
+    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Recording, Clip, Snapshot, SearchResult, AnalyticsSummary, Behaviour, Identity, IdentityObservation, IdentityStatistics, UpdateIdentity, IdentityScore, BehaviourScore, AnomalyEvent, IntelligenceSummary, ModelAssignment, CreateModelAssignment, FusionResult, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
     tags((name = "cameras", description = "Camera management and RTSP ingestion"))
 )]
 pub struct ApiDoc;
@@ -89,6 +89,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/identities", get(list_identities))
         .route("/api/identities/:id", get(get_identity).put(update_identity))
         .route("/api/identities/:id/history", get(identity_history))
+        .route("/api/intelligence", get(intelligence_summary))
+        .route("/api/anomalies", get(list_anomalies))
         .route("/api/fusion", get(list_fusion))
         .route("/api/model-assignments", get(list_model_assignments).post(create_model_assignment))
         .route("/api/analytics", get(analytics_summary))
@@ -534,6 +536,17 @@ async fn list_events(State(state): State<Arc<AppState>>, Query(query): Query<Lim
 
 #[utoipa::path(get, path = "/api/events/{id}", tag = "events", params(("id" = Uuid, Path)), responses((status = 200, body = Event), (status = 404), (status = 503)))]
 async fn get_event(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Event>, ErrorResponse> { match database(&state)?.get_event(id).await.map_err(internal_error)? { Some(event) => Ok(Json(event)), None => Err(not_found("event not found")) } }
+
+#[utoipa::path(get, path = "/api/anomalies", tag = "intelligence", responses((status = 200, body = [AnomalyEvent]), (status = 503)))]
+async fn list_anomalies(State(state): State<Arc<AppState>>, Query(query): Query<LimitQuery>) -> Result<Json<Vec<AnomalyEvent>>, ErrorResponse> { database(&state)?.list_anomalies(query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(get, path = "/api/intelligence", tag = "intelligence", responses((status = 200, body = IntelligenceSummary), (status = 503)))]
+async fn intelligence_summary(State(state): State<Arc<AppState>>) -> Result<Json<IntelligenceSummary>, ErrorResponse> {
+    let database = database(&state)?;
+    let identities = database.list_identities(100).await.map_err(internal_error)?;
+    let anomalies = database.list_anomalies(100).await.map_err(internal_error)?;
+    Ok(Json(IntelligenceSummary { identities, highest_priority: anomalies.iter().take(10).cloned().collect(), anomalies }))
+}
 
 fn validate_rule(name: &str, cooldown_seconds: i64, suppression_seconds: i64) -> Result<(), ErrorResponse> { if name.trim().is_empty() { return Err(bad_request("rule name cannot be empty")); } if cooldown_seconds < 0 || suppression_seconds < 0 { return Err(bad_request("cooldown and suppression cannot be negative")); } Ok(()) }
 

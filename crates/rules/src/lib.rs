@@ -13,6 +13,8 @@ pub struct ObservationContext<'a> {
     pub behaviour_type: Option<&'a str>,
     pub identity_id: Option<Uuid>,
     pub familiarity: Option<&'a str>,
+    pub priority: Option<&'a str>,
+    pub anomaly_score: Option<f32>,
 }
 
 #[derive(Default)]
@@ -57,7 +59,7 @@ mod tests {
         let observation = Observation { id: Uuid::new_v4(), camera_id: Uuid::new_v4(), track_id: Uuid::new_v4(), observation_type: "zone_entered".into(), summary: "Cat entered backyard".into(), created_at: now };
         let rule = Rule { id: Uuid::new_v4(), name: "Cat in backyard".into(), enabled: true, description: String::new(), cooldown_seconds: 30, suppression_seconds: 0, severity: EventSeverity::Info, conditions: vec![RuleCondition { id: Uuid::new_v4(), rule_id: Uuid::new_v4(), object_class: Some("cat".into()), zone_id: None, observation_type: Some("zone_entered".into()), behaviour_type: None, confidence_threshold: None, minimum_duration_ms: None }], action_ids: vec![], created_at: now, updated_at: now };
         let mut engine = RuleEngine::default();
-        let context = ObservationContext { observation: &observation, object_class: Some("cat"), zone_id: None, confidence: Some(0.9), duration_ms: None, behaviour_type: None, identity_id: None, familiarity: None };
+        let context = ObservationContext { observation: &observation, object_class: Some("cat"), zone_id: None, confidence: Some(0.9), duration_ms: None, behaviour_type: None, identity_id: None, familiarity: None, priority: None, anomaly_score: None };
         assert_eq!(engine.evaluate(&[rule.clone()], context.clone(), now).len(), 1);
         assert!(engine.evaluate(&[rule], context, now + Duration::seconds(1)).is_empty());
     }
