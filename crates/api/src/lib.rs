@@ -1,6 +1,6 @@
 use axum::{
     body::Body,
-    extract::{Path, Query, State, WebSocketUpgrade, Request},
+    extract::{ws::Message, Path, Query, State, WebSocketUpgrade, Request},
     http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     middleware::{self, Next},
     response::Response,
@@ -14,7 +14,7 @@ use objexel_analytics::AnalyticsSummary;
 use objexel_common::{AnomalyEvent, Behaviour, BehaviourScore, CreateModelAssignment, IdentityScore, FusionResult, Identity, IdentityObservation, IdentityStatistics, IntelligenceSummary, ModelAssignment, ModelCatalogEntry, ModelDownload, UpdateIdentity, UpdateInfo, UpdateModelEnabled};
 use objexel_camera::{CameraManager, CameraService};
 use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, CameraTestResult, Clip, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, CreateZone, Detection, Event, HealthResponse, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, Snapshot, StreamMetadata, Track, UpdateAction, UpdateCamera, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent};
-use objexel_pipeline::ObservationPipeline;
+use objexel_pipeline::{ObservationPipeline, PipelineResult};
 use objexel_models::ModelRegistry;
 use objexel_playback::PlaybackService;
 use objexel_recorder::Recorder;
@@ -23,6 +23,7 @@ use objexel_zones::validate_polygon;
 use objexel_database::Database;
 use serde_json::{json, Value};
 use std::{sync::{atomic::{AtomicU64, Ordering}, Arc}, time::Instant};
+use tokio::sync::broadcast;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 use uuid::Uuid;
@@ -34,6 +35,36 @@ pub struct AppState {
     pub pipeline: Option<ObservationPipeline>,
     pub recorder: Recorder,
     pub playback: PlaybackService,
+    /// Broadcast channel for the live-events WebSocket. Producers publish serialized
+    /// pipeline results here; each `/api/v1/events` subscriber receives them.
+    pub events: LiveEventSender,
+}
+
+/// Sender half of the live-events broadcast channel. Each subscriber (WebSocket client)
+/// gets a receiver; messages are pre-serialized JSON envelopes.
+pub type LiveEventSender = broadcast::Sender<String>;
+
+/// Create a live-events broadcast channel with the given buffer capacity. Slow subscribers
+/// that fall behind drop the oldest buffered messages (a `Lagged` skip) rather than block producers.
+pub fn live_channel(capacity: usize) -> LiveEventSender {
+    broadcast::channel(capacity).0
+}
+
+/// Publish the meaningful signals from a processed frame to live-events subscribers.
+/// Raw detections are intentionally omitted — they are high-volume and would flood clients;
+/// events, observations, and zone crossings are the actionable feed. When no client is
+/// connected `send` returns an error, which is ignored.
+pub fn broadcast_pipeline_result(sender: &LiveEventSender, result: &PipelineResult) {
+    if sender.receiver_count() == 0 { return; }
+    for event in &result.events {
+        let _ = sender.send(json!({ "kind": "event", "data": event }).to_string());
+    }
+    for observation in &result.observations {
+        let _ = sender.send(json!({ "kind": "observation", "data": observation }).to_string());
+    }
+    for zone_event in &result.zone_events {
+        let _ = sender.send(json!({ "kind": "zone_event", "data": zone_event }).to_string());
+    }
 }
 
 #[derive(Clone)]
@@ -843,7 +874,28 @@ async fn intelligence_summary(State(state): State<Arc<AppState>>) -> Result<Json
 
 fn validate_rule(name: &str, cooldown_seconds: i64, suppression_seconds: i64) -> Result<(), ErrorResponse> { if name.trim().is_empty() { return Err(bad_request("rule name cannot be empty")); } if cooldown_seconds < 0 || suppression_seconds < 0 { return Err(bad_request("cooldown and suppression cannot be negative")); } Ok(()) }
 
-async fn events_socket(ws: WebSocketUpgrade) -> impl axum::response::IntoResponse { ws.on_upgrade(|_socket| async move { tracing::debug!("event websocket connected"); }) }
+async fn events_socket(ws: WebSocketUpgrade, State(state): State<Arc<AppState>>) -> impl axum::response::IntoResponse {
+    let mut receiver = state.events.subscribe();
+    ws.on_upgrade(move |mut socket| async move {
+        tracing::debug!("live event websocket connected");
+        if socket.send(Message::Text("{\"kind\":\"connected\"}".to_string())).await.is_err() { return; }
+        loop {
+            tokio::select! {
+                broadcasted = receiver.recv() => match broadcasted {
+                    Ok(payload) => { if socket.send(Message::Text(payload)).await.is_err() { break; } }
+                    Err(broadcast::error::RecvError::Lagged(skipped)) => { tracing::debug!(skipped, "live event subscriber lagged"); }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+                incoming = socket.recv() => match incoming {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(_)) => {}
+                    Some(Err(_)) => break,
+                },
+            }
+        }
+        tracing::debug!("live event websocket disconnected");
+    })
+}
 async fn openapi() -> Json<utoipa::openapi::OpenApi> { Json(ApiDoc::openapi()) }
 
 type ErrorResponse = (StatusCode, Json<Value>);
@@ -862,7 +914,7 @@ mod tests {
     use axum::{body::Body, http::{Request, StatusCode}};
     use tower::ServiceExt;
 
-    fn test_state() -> AppState { AppState { database: None, camera_service: CameraService::default(), pipeline: None, recorder: Recorder::default(), playback: PlaybackService::new("/var/lib/objexel") } }
+    fn test_state() -> AppState { AppState { database: None, camera_service: CameraService::default(), pipeline: None, recorder: Recorder::default(), playback: PlaybackService::new("/var/lib/objexel"), events: live_channel(16) } }
 
     #[tokio::test]
     async fn health_endpoint_is_available() {
@@ -891,6 +943,21 @@ mod tests {
         assert!(is_write_method(&Method::DELETE));
         assert!(!is_write_method(&Method::GET));
         assert!(!is_write_method(&Method::HEAD));
+    }
+
+    #[tokio::test]
+    async fn broadcast_delivers_observations_to_subscribers() {
+        let sender = live_channel(16);
+        let mut receiver = sender.subscribe();
+        let result = PipelineResult {
+            detections: vec![], tracks: vec![],
+            observations: vec![Observation { id: Uuid::new_v4(), camera_id: Uuid::new_v4(), track_id: Uuid::new_v4(), observation_type: "zone_entered".into(), summary: "person entered yard".into(), created_at: Utc::now() }],
+            zone_events: vec![], events: vec![],
+        };
+        broadcast_pipeline_result(&sender, &result);
+        let message = receiver.recv().await.expect("subscriber receives the observation");
+        assert!(message.contains("\"kind\":\"observation\""));
+        assert!(message.contains("person entered yard"));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use objexel_api::{router, AppState};
+use objexel_api::{broadcast_pipeline_result, live_channel, router, AppState};
 use objexel_camera::{CameraService, FrameIngestor, IngestorConfig};
 use objexel_detector::FrameTensor;
 use objexel_pipeline::ObservationPipeline;
@@ -121,15 +121,21 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
+    // Live-events broadcast channel: pipeline results published here fan out to every
+    // connected /api/v1/events WebSocket subscriber. Created unconditionally so the API
+    // exposes the endpoint even in health-only mode (it simply never emits).
+    let events = live_channel(256);
     // --- Live frame ingestion ---------------------------------------------------
     if let (Some(database), Some(pipeline)) = (&database, &pipeline) {
         let ingestor = FrameIngestor::new(IngestorConfig { fps: ingestor_fps, ..IngestorConfig::default() });
         for camera in database.list_cameras().await? {
             if !camera.enabled { continue; }
             let pipeline = pipeline.clone();
+            let events = events.clone();
             let camera_id = camera.id;
             ingestor.spawn(camera_id, &camera.rtsp_url, move |frame| {
                 let pipeline = pipeline.clone();
+                let events = events.clone();
                 async move {
                     let tensor = FrameTensor {
                         camera_id,
@@ -139,6 +145,7 @@ async fn main() -> anyhow::Result<()> {
                     };
                     match pipeline.process_frame(tensor).await {
                         Ok(result) => {
+                            broadcast_pipeline_result(&events, &result);
                             tracing::debug!(camera_id = %camera_id, detections = result.detections.len(), "live frame processed");
                         }
                         Err(error) => {
@@ -151,7 +158,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let app = router(AppState { database, camera_service, pipeline, recorder, playback });
+    let app = router(AppState { database, camera_service, pipeline, recorder, playback, events });
     let web_dir = env::var("OBJEXEL_WEB_DIR").unwrap_or_else(|_| "/usr/local/share/objexel/web".into());
     let app = app.fallback_service(ServeDir::new(&web_dir).not_found_service(ServeFile::new(format!("{web_dir}/index.html"))));
     let address = env::var("OBJEXEL_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into());
