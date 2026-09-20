@@ -23,8 +23,9 @@ This repository currently contains the production-oriented foundation:
 
 ```bash
 # Start PostgreSQL, then run the API with DATABASE_URL configured in your shell:
+export POSTGRES_PASSWORD='replace-with-a-long-random-password'
 docker compose up -d postgres
-DATABASE_URL=postgres://objexel:objexel@localhost:5432/objexel cargo run -p objexel-api
+DATABASE_URL="postgres://objexel:${POSTGRES_PASSWORD}@localhost:5432/objexel" cargo run -p objexel-api
 ```
 
 The API listens on `0.0.0.0:8080` by default. `GET /health` does not require a database; `GET /ready` reports PostgreSQL readiness. SQLx applies all files in `migrations/` at startup. The REST surface is:
@@ -75,6 +76,14 @@ cargo fmt --all -- --check
 cargo test --workspace
 cargo check --workspace
 ```
+
+## Production setup
+
+See [`INSTALL.md`](INSTALL.md) for Debian 13, Ubuntu 24.04+, Proxmox VM, Docker Compose, CPU-only, and NVIDIA deployment instructions. On first start, open `/setup` to create the administrator account; subsequent setup attempts are rejected once a user exists. Authenticate through `/login`.
+
+Authentication uses Argon2id password hashes and revocable, HttpOnly, SameSite session cookies. Administrator user changes require the CSRF token returned by login/setup in the `X-CSRF-Token` header. Set `OBJEXEL_COOKIE_SECURE=1` behind HTTPS; local plain-HTTP development can leave it unset.
+
+Operational procedures are documented in [`OPERATIONS.md`](OPERATIONS.md), [`BACKUP.md`](BACKUP.md), [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md), and [`UPGRADE.md`](UPGRADE.md). The Compose deployment keeps PostgreSQL on the internal Compose network; expose it only through an explicit, protected operator override.
 
 ## License
 

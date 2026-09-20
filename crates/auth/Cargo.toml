@@ -1,0 +1,15 @@
+[package]
+name = "objexel-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+argon2.workspace = true
+chrono.workspace = true
+hex.workspace = true
+rand.workspace = true
+serde.workspace = true
+sha2.workspace = true
+uuid.workspace = true

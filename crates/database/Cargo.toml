@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+objexel-auth = { path = "../auth" }
 objexel-common = { path = "../common" }
 objexel-analytics = { path = "../analytics" }
 objexel-behaviour = { path = "../behaviour" }

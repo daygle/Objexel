@@ -1,13 +1,14 @@
 use axum::{
     body::Body,
-    extract::{Path, Query, State, WebSocketUpgrade},
-    http::{header, StatusCode},
+    extract::{Path, Query, State, WebSocketUpgrade, Request},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::Response,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use chrono::Utc;
 use objexel_actions::ActionDispatcher;
+use objexel_auth::{digest_token, generate_csrf_token, generate_token, hash_password, verify_password, AuthResponse, CreateUser, LoginRequest, Role, SessionUser, UpdateUser, User};
 use objexel_analytics::AnalyticsSummary;
 use objexel_common::{AnomalyEvent, Behaviour, BehaviourScore, CreateModelAssignment, IdentityScore, FusionResult, Identity, IdentityObservation, IdentityStatistics, IntelligenceSummary, ModelAssignment, UpdateIdentity};
 use objexel_camera::{CameraManager, CameraService};
@@ -32,13 +33,18 @@ pub struct AppState {
     pub pipeline: Option<ObservationPipeline>,
     pub recorder: Recorder,
     pub playback: PlaybackService,
-    pub metrics: RuntimeMetrics,
 }
 
 #[derive(Clone)]
 pub struct RuntimeMetrics {
     started_at: Instant,
     requests: Arc<AtomicU64>,
+}
+
+static RUNTIME_METRICS: std::sync::OnceLock<RuntimeMetrics> = std::sync::OnceLock::new();
+
+fn runtime_metrics() -> &'static RuntimeMetrics {
+    RUNTIME_METRICS.get_or_init(RuntimeMetrics::default)
 }
 
 impl Default for RuntimeMetrics {
@@ -80,6 +86,12 @@ pub fn router(state: AppState) -> Router {
         .route("/readiness", get(readiness))
         .route("/liveness", get(liveness))
         .route("/metrics", get(metrics))
+        .route("/api/auth/login", post(login))
+        .route("/api/auth/logout", post(logout))
+        .route("/api/auth/setup", post(setup_admin))
+        .route("/api/auth/me", get(me))
+        .route("/api/users", get(list_users).post(create_user))
+        .route("/api/users/:id", axum::routing::put(update_user).delete(delete_user))
         .route("/api/openapi.json", get(openapi))
         .route("/api/v1/openapi.json", get(openapi))
         .route("/api/v1/events", get(events_socket))
@@ -140,7 +152,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/events", get(list_events))
         .route("/api/events/:id", get(get_event))
         .merge(camera_routes)
-        .with_state(Arc::new(state))
+            .with_state(Arc::new(state))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
 }
@@ -158,7 +170,7 @@ async fn readiness(State(state): State<Arc<AppState>>) -> (StatusCode, Json<Valu
 
 #[utoipa::path(get, path = "/metrics", responses((status = 200)))]
 async fn metrics(State(state): State<Arc<AppState>>) -> Json<Value> {
-    let mut value = state.metrics.snapshot();
+    let mut value = runtime_metrics().snapshot();
     if let Some(database) = &state.database {
         let cameras = database.list_cameras().await.unwrap_or_default();
         let tracks = database.list_tracks(10_000).await.unwrap_or_default();
@@ -170,6 +182,97 @@ async fn metrics(State(state): State<Arc<AppState>>) -> Json<Value> {
         value["database"] = json!("ok");
     } else { value["database"] = json!("not_configured"); }
     Json(value)
+}
+
+const SESSION_COOKIE: &str = "objexel_session";
+const SESSION_DAYS: i64 = 7;
+
+fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers.get(header::COOKIE)?.to_str().ok()?.split(';').find_map(|part| { let (key, value) = part.trim().split_once('=')?; (key == name).then(|| value.to_owned()) })
+}
+
+async fn authenticated(state: &Arc<AppState>, headers: &HeaderMap) -> Result<SessionUser, ErrorResponse> {
+    let token = cookie_value(headers, SESSION_COOKIE).ok_or_else(|| bad_request("authentication required"))?;
+    let session = database(state)?.session_user(&digest_token(&token)).await.map_err(internal_error)?.ok_or_else(|| bad_request("invalid or expired session"))?;
+    let _ = database(state)?.update_session_seen(session.session_id).await;
+    Ok(session)
+}
+
+fn require_admin(session: &SessionUser) -> Result<(), ErrorResponse> { if session.user.role.can_manage_users() { Ok(()) } else { Err(bad_request("administrator role required")) } }
+
+fn require_csrf(session: &SessionUser, headers: &HeaderMap) -> Result<(), ErrorResponse> {
+    let token = headers.get("x-csrf-token").and_then(|value| value.to_str().ok()).ok_or_else(|| bad_request("CSRF token required"))?;
+    if digest_token(token) == session.csrf_token_hash { Ok(()) } else { Err(bad_request("invalid CSRF token")) }
+}
+
+fn session_response(auth: AuthResponse, token: &str) -> Result<(HeaderMap, Json<AuthResponse>), ErrorResponse> {
+    let mut headers = HeaderMap::new();
+    let secure = std::env::var("OBJEXEL_COOKIE_SECURE").map(|value| value != "0").unwrap_or(false);
+    let secure_flag = if secure { "; Secure" } else { "" };
+    headers.insert(header::SET_COOKIE, HeaderValue::from_str(&format!("{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{}", SESSION_DAYS * 86_400, secure_flag)).map_err(|_| internal_error(anyhow::anyhow!("invalid session cookie")))?);
+    Ok((headers, Json(auth)))
+}
+
+async fn login(State(state): State<Arc<AppState>>, Json(input): Json<LoginRequest>) -> Result<(HeaderMap, Json<AuthResponse>), ErrorResponse> {
+    let database = database(&state)?;
+    let (user, password_hash) = database.get_user_credentials(&input.username).await.map_err(internal_error)?.ok_or_else(|| bad_request("invalid username or password"))?;
+    if !user.enabled || !verify_password(&input.password, &password_hash) { return Err(bad_request("invalid username or password")); }
+    let token = generate_token(); let csrf = generate_csrf_token();
+    database.insert_session(Uuid::new_v4(), user.id, &digest_token(&token), &digest_token(&csrf), Utc::now() + chrono::Duration::days(SESSION_DAYS)).await.map_err(internal_error)?;
+    let _ = database.audit(Some(user.id), "auth.login", "user", Some(user.id), json!({})).await;
+    session_response(AuthResponse { user, csrf_token: csrf }, &token)
+}
+
+async fn setup_admin(State(state): State<Arc<AppState>>, Json(input): Json<CreateUser>) -> Result<(HeaderMap, Json<AuthResponse>), ErrorResponse> {
+    let database = database(&state)?;
+    if database.user_count().await.map_err(internal_error)? != 0 { return Err(bad_request("initial setup is already complete")); }
+    if input.role != Role::Administrator { return Err(bad_request("first user must be an administrator")); }
+    let password_hash = hash_password(&input.password).map_err(|error| bad_request(&error.to_string()))?;
+    let user = database.create_user(Uuid::new_v4(), &input.username, input.email.as_deref(), &password_hash, Role::Administrator).await.map_err(internal_error)?;
+    let token = generate_token(); let csrf = generate_csrf_token();
+    database.insert_session(Uuid::new_v4(), user.id, &digest_token(&token), &digest_token(&csrf), Utc::now() + chrono::Duration::days(SESSION_DAYS)).await.map_err(internal_error)?;
+    let _ = database.audit(Some(user.id), "auth.setup", "user", Some(user.id), json!({})).await;
+    session_response(AuthResponse { user, csrf_token: csrf }, &token)
+}
+
+async fn logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<StatusCode, ErrorResponse> {
+    if let Some(token) = cookie_value(&headers, SESSION_COOKIE) {
+        if let Some(database) = &state.database {
+            let token_hash = digest_token(&token);
+            if let Some(session) = database.session_user(&token_hash).await.map_err(internal_error)? {
+                require_csrf(&session, &headers)?;
+                database.delete_session(&token_hash).await.map_err(internal_error)?;
+                let _ = database.audit(Some(session.user.id), "auth.logout", "user", Some(session.user.id), json!({})).await;
+            }
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<Json<User>, ErrorResponse> { Ok(Json(authenticated(&state, &headers).await?.user)) }
+
+async fn list_users(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<Json<Vec<User>>, ErrorResponse> { let session = authenticated(&state, &headers).await?; require_admin(&session)?; database(&state)?.list_users().await.map(Json).map_err(internal_error) }
+
+async fn create_user(State(state): State<Arc<AppState>>, headers: HeaderMap, Json(input): Json<CreateUser>) -> Result<(StatusCode, Json<User>), ErrorResponse> {
+    let session = authenticated(&state, &headers).await?; require_admin(&session)?; require_csrf(&session, &headers)?;
+    let hash = hash_password(&input.password).map_err(|error| bad_request(&error.to_string()))?;
+    let database = database(&state)?; let user = database.create_user(Uuid::new_v4(), &input.username, input.email.as_deref(), &hash, input.role).await.map_err(internal_error)?;
+    database.audit(Some(session.user.id), "user.created", "user", Some(user.id), json!({})).await.map_err(internal_error)?;
+    Ok((StatusCode::CREATED, Json(user)))
+}
+
+async fn update_user(State(state): State<Arc<AppState>>, headers: HeaderMap, Path(id): Path<Uuid>, Json(input): Json<UpdateUser>) -> Result<Json<User>, ErrorResponse> {
+    let session = authenticated(&state, &headers).await?; require_admin(&session)?; require_csrf(&session, &headers)?;
+    let hash = input.password.as_deref().map(hash_password).transpose().map_err(|error| bad_request(&error.to_string()))?;
+    let database = database(&state)?; let user = database.update_user(id, Some(input.email.as_deref()), hash.as_deref(), input.role, input.enabled).await.map_err(internal_error)?.ok_or_else(|| not_found("user not found"))?;
+    database.audit(Some(session.user.id), "user.updated", "user", Some(id), json!({})).await.map_err(internal_error)?;
+    Ok(Json(user))
+}
+
+async fn delete_user(State(state): State<Arc<AppState>>, headers: HeaderMap, Path(id): Path<Uuid>) -> Result<StatusCode, ErrorResponse> {
+    let session = authenticated(&state, &headers).await?; require_admin(&session)?; require_csrf(&session, &headers)?; if id == session.user.id { return Err(bad_request("cannot delete the current administrator")); }
+    let database = database(&state)?; if !database.delete_user(id).await.map_err(internal_error)? { return Err(not_found("user not found")); }
+    database.audit(Some(session.user.id), "user.deleted", "user", Some(id), json!({})).await.map_err(internal_error)?; Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(get, path = "/ready", responses((status = 200), (status = 503)))]

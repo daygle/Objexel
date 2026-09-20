@@ -1,4 +1,4 @@
-use objexel_api::{router, AppState, RuntimeMetrics};
+use objexel_api::{router, AppState};
 use objexel_camera::CameraService;
 use objexel_pipeline::ObservationPipeline;
 use objexel_playback::PlaybackService;
@@ -114,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-    let app = router(AppState { database, camera_service, pipeline, recorder, playback, metrics: RuntimeMetrics::default() });
+    let app = router(AppState { database, camera_service, pipeline, recorder, playback });
     let address = env::var("OBJEXEL_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into());
     let listener = TcpListener::bind(&address).await?;
     tracing::info!(%address, "Objexel API listening");

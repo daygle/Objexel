@@ -1,4 +1,5 @@
 use anyhow::Context;
+use objexel_auth::{Role, SessionUser, User};
 use objexel_analytics::{AnalyticsMetric, AnalyticsSnapshot, AnalyticsSummary};
 use objexel_adaptive::AdaptiveAssessment;
 use objexel_behaviour::Behaviour;
@@ -47,6 +48,64 @@ impl Database {
             .bind(details)
             .execute(&self.pool)
             .await?;
+        Ok(())
+    }
+
+    pub async fn user_count(&self) -> anyhow::Result<i64> {
+        Ok(sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&self.pool).await?)
+    }
+
+    pub async fn create_user(&self, id: Uuid, username: &str, email: Option<&str>, password_hash: &str, role: Role) -> anyhow::Result<User> {
+        sqlx::query("INSERT INTO users (id, username, email, password_hash, role) VALUES ($1, $2, $3, $4, $5)")
+            .bind(id).bind(username).bind(email).bind(password_hash).bind(role.as_str()).execute(&self.pool).await?;
+        self.get_user(id).await?.context("user was not returned after insert")
+    }
+
+    pub async fn get_user(&self, id: Uuid) -> anyhow::Result<Option<User>> {
+        sqlx::query("SELECT id, username, email, role, enabled, created_at FROM users WHERE id = $1")
+            .bind(id).fetch_optional(&self.pool).await?.map(user_from_row).transpose()
+    }
+
+    pub async fn get_user_credentials(&self, username: &str) -> anyhow::Result<Option<(User, String)>> {
+        sqlx::query("SELECT id, username, email, role, enabled, created_at, password_hash FROM users WHERE username = $1")
+            .bind(username).fetch_optional(&self.pool).await?.map(|row| Ok((user_from_row(row.clone())?, row.try_get("password_hash")?))).transpose()
+    }
+
+    pub async fn update_user(&self, id: Uuid, email: Option<Option<&str>>, password_hash: Option<&str>, role: Option<Role>, enabled: Option<bool>) -> anyhow::Result<Option<User>> {
+        let role_name = role.map(|value| value.as_str().to_owned());
+        let result = sqlx::query("UPDATE users SET email = COALESCE($2, email), password_hash = COALESCE($3, password_hash), role = COALESCE($4, role), enabled = COALESCE($5, enabled) WHERE id = $1")
+            .bind(id).bind(email.flatten()).bind(password_hash).bind(role_name).bind(enabled).execute(&self.pool).await?;
+        if result.rows_affected() == 0 { return Ok(None); }
+        self.get_user(id).await
+    }
+
+    pub async fn delete_user(&self, id: Uuid) -> anyhow::Result<bool> {
+        Ok(sqlx::query("DELETE FROM users WHERE id = $1").bind(id).execute(&self.pool).await?.rows_affected() > 0)
+    }
+
+    pub async fn list_users(&self) -> anyhow::Result<Vec<User>> {
+        let rows = sqlx::query("SELECT id, username, email, role, enabled, created_at FROM users ORDER BY username").fetch_all(&self.pool).await?;
+        rows.into_iter().map(user_from_row).collect()
+    }
+
+    pub async fn insert_session(&self, id: Uuid, user_id: Uuid, token_hash: &str, csrf_token_hash: &str, expires_at: chrono::DateTime<chrono::Utc>) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO sessions (id, user_id, token_hash, csrf_token_hash, expires_at) VALUES ($1, $2, $3, $4, $5)")
+            .bind(id).bind(user_id).bind(token_hash).bind(csrf_token_hash).bind(expires_at).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn session_user(&self, token_hash: &str) -> anyhow::Result<Option<SessionUser>> {
+        sqlx::query("SELECT s.id AS session_id, s.csrf_token_hash, u.id, u.username, u.email, u.role, u.enabled, u.created_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = $1 AND s.expires_at > NOW() AND u.enabled")
+            .bind(token_hash).fetch_optional(&self.pool).await?.map(|row| Ok(SessionUser { session_id: row.try_get("session_id")?, csrf_token_hash: row.try_get("csrf_token_hash")?, user: user_from_row(row)? })).transpose()
+    }
+
+    pub async fn delete_session(&self, token_hash: &str) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM sessions WHERE token_hash = $1").bind(token_hash).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn update_session_seen(&self, id: Uuid) -> anyhow::Result<()> {
+        sqlx::query("UPDATE sessions SET last_seen_at = NOW() WHERE id = $1").bind(id).execute(&self.pool).await?;
         Ok(())
     }
 
@@ -655,6 +714,10 @@ impl Database {
             .await?;
         Ok(result.rows_affected() == 1)
     }
+}
+
+fn user_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<User> {
+    Ok(User { id: row.try_get("id")?, username: row.try_get("username")?, email: row.try_get("email")?, role: Role::try_from(row.try_get::<String, _>("role")?.as_str())?, enabled: row.try_get("enabled")?, created_at: row.try_get("created_at")? })
 }
 
 fn camera_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Camera> {

@@ -4,9 +4,7 @@ services:
     environment:
       POSTGRES_DB: objexel
       POSTGRES_USER: objexel
-      POSTGRES_PASSWORD: objexel
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     volumes:
       - objexel-postgres:/var/lib/postgresql/data
     healthcheck:
@@ -22,8 +20,11 @@ services:
       context: .
       dockerfile: docker/api.Dockerfile
     environment:
-      DATABASE_URL: postgres://objexel:objexel@postgres:5432/objexel
-      RUST_LOG: info
+      DATABASE_URL: postgres://objexel:${POSTGRES_PASSWORD:-change-me}@postgres:5432/objexel
+      RUST_LOG: ${RUST_LOG:-info}
+      OBJEXEL_STORAGE_DIR: /var/lib/objexel
+      OBJEXEL_MODEL_DIR: /models
+      OBJEXEL_COOKIE_SECURE: ${OBJEXEL_COOKIE_SECURE:-1}
     ports:
       - "8080:8080"
     restart: unless-stopped
@@ -34,6 +35,11 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+    volumes:
+      - ./models:/models:ro
+      - ./recordings:/var/lib/objexel/recordings
+      - ./clips:/var/lib/objexel/clips
+      - ./snapshots:/var/lib/objexel/snapshots
     depends_on:
       postgres:
         condition: service_healthy

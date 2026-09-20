@@ -21,6 +21,7 @@ members = [
     "crates/fusion",
     "crates/identity",
     "crates/adaptive",
+    "crates/auth",
     "crates/api",
 ]
 
@@ -32,6 +33,7 @@ repository = "https://github.com/objexel/objexel"
 
 [workspace.dependencies]
 anyhow = "1.0"
+argon2 = "0.5"
 async-trait = "0.1"
 axum = { version = "0.7", features = ["macros", "ws"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -48,4 +50,7 @@ uuid = { version = "1.10", features = ["serde", "v4"] }
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "download-binaries", "cuda"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1-rustls-tls"] }
+rand = "0.8"
 rumqttc = "0.24"
+sha2 = "0.10"
+hex = "0.4"
