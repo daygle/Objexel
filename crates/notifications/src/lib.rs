@@ -73,4 +73,4 @@ impl NotificationService {
     }
 }
 
-fn required_string(config: &Value, key: &str) -> Result<&str> { config.get(key).and_then(Value::as_str).filter(|value| !value.trim().is_empty()).with_context(|| format!("notification configuration requires {key}")) }
+fn required_string<'a>(config: &'a Value, key: &str) -> Result<&'a str> { config.get(key).and_then(Value::as_str).filter(|value| !value.trim().is_empty()).with_context(|| format!("notification configuration requires {key}")) }
