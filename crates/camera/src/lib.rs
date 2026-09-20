@@ -4,11 +4,16 @@ use objexel_common::{Camera, CameraStatus, CameraTestResult, StreamMetadata};
 use serde::Deserialize;
 use std::{collections::HashMap, future::Future, process::Stdio, sync::Arc};
 use tokio::{
+    io::AsyncReadExt,
     process::Command,
     sync::RwLock,
     time::{sleep, timeout, Duration},
 };
 use uuid::Uuid;
+
+// ---------------------------------------------------------------------------
+// CameraManager trait + CameraService (existing)
+// ---------------------------------------------------------------------------
 
 #[async_trait]
 pub trait CameraManager: Send + Sync {
@@ -159,6 +164,167 @@ struct ProbeStream {
     frame_rate: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// FrameIngestor — RTSP frame decoding for the live processing pipeline
+// ---------------------------------------------------------------------------
+
+/// A single decoded video frame in raw RGB24 format.
+#[derive(Debug, Clone)]
+pub struct DecodedFrame {
+    pub width: u32,
+    pub height: u32,
+    pub data: Vec<u8>,
+}
+
+/// Configuration for the [`FrameIngestor`].
+#[derive(Debug, Clone)]
+pub struct IngestorConfig {
+    pub ffmpeg_bin: String,
+    pub ffprobe_bin: String,
+    /// Target frames per second.  Frames are dropped by FFmpeg to match.
+    pub fps: f64,
+    pub reconnect_initial: Duration,
+    pub reconnect_max: Duration,
+    pub connect_timeout: Duration,
+}
+
+impl Default for IngestorConfig {
+    fn default() -> Self {
+        Self {
+            ffmpeg_bin: "ffmpeg".into(),
+            ffprobe_bin: "ffprobe".into(),
+            fps: 5.0,
+            reconnect_initial: Duration::from_secs(2),
+            reconnect_max: Duration::from_secs(60),
+            connect_timeout: Duration::from_secs(30),
+        }
+    }
+}
+
+/// Continuously decodes an RTSP stream and yields [`DecodedFrame`]s via a
+/// callback.  Automatically reconnects on failure with exponential back-off.
+///
+/// The returned [`JoinHandle`] runs until aborted (e.g. via `AbortHandle`).
+pub struct FrameIngestor {
+    config: IngestorConfig,
+}
+
+impl FrameIngestor {
+    pub fn new(config: IngestorConfig) -> Self { Self { config } }
+
+    /// Spawn a long-lived decode loop for `camera_id` / `rtsp_url`.
+    ///
+    /// `on_frame` is called for every successfully decoded frame.  The future
+    /// runs on the Tokio runtime, so keep the work inside it non-blocking or
+    /// spawn heavy processing on a blocking pool.
+    pub fn spawn<F, Fut>(&self, camera_id: Uuid, rtsp_url: &str, on_frame: F) -> tokio::task::JoinHandle<()>
+    where
+        F: Fn(DecodedFrame) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let config = self.config.clone();
+        let url = rtsp_url.to_owned();
+        tokio::spawn(async move {
+            let mut delay = config.reconnect_initial;
+            loop {
+                match run_stream(&config, &url, &on_frame).await {
+                    Ok(()) => {
+                        tracing::info!(camera_id = %camera_id, "RTSP ingestor ended; reconnecting");
+                        delay = config.reconnect_initial;
+                    }
+                    Err(error) => {
+                        tracing::warn!(camera_id = %camera_id, %error, "RTSP ingestor error; reconnecting");
+                    }
+                }
+                sleep(delay).await;
+                delay = std::cmp::min(delay.saturating_mul(2), config.reconnect_max);
+            }
+        })
+    }
+}
+
+/// Probe the RTSP stream for video dimensions, then spawn FFmpeg to decode
+/// frames at the configured FPS and invoke the callback for each one.
+///
+/// Uses a channel to bridge the blocking stdout reader and the async callback.
+async fn run_stream<F, Fut>(config: &IngestorConfig, rtsp_url: &str, on_frame: &F) -> Result<()>
+where
+    F: Fn(DecodedFrame) -> Fut + Send + Sync,
+    Fut: Future<Output = ()> + Send,
+{
+    let (width, height) = probe_dimensions(&config.ffprobe_bin, &config.connect_timeout, rtsp_url).await?;
+    let frame_bytes = (width * height * 3) as usize;
+
+    let fps_arg = format!("{}", config.fps);
+    let mut child = timeout(config.connect_timeout, async {
+        Command::new(&config.ffmpeg_bin)
+            .args([
+                "-hide_banner", "-loglevel", "error",
+                "-rtsp_transport", "tcp",
+                "-i", rtsp_url,
+                "-vf", &format!("fps={fps_arg}"),
+                "-f", "rawvideo",
+                "-pix_fmt", "rgb24",
+                "pipe:1",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("spawn ffmpeg")
+    })
+    .await
+    .context("ffmpeg spawn timed out")??;
+
+    let mut stdout = child.stdout.take().context("ffmpeg stdout not captured")?;
+
+    // Read complete frames from stdout and invoke the callback for each.
+    let mut frame_buf = vec![0u8; frame_bytes];
+    let mut result: Result<()> = Ok(());
+    loop {
+        match stdout.read_exact(&mut frame_buf).await {
+            Ok(_) => {
+                on_frame(DecodedFrame { width, height, data: frame_buf.clone() }).await;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                break;
+            }
+            Err(e) => {
+                result = Err(anyhow!("read ffmpeg frame: {e}"));
+                break;
+            }
+        }
+    }
+
+    let _ = child.wait().await;
+    result
+}
+
+/// Probe the RTSP stream and return `(width, height)` of the first video stream.
+async fn probe_dimensions(ffprobe_bin: &str, command_timeout: &Duration, rtsp_url: &str) -> Result<(u32, u32)> {
+    let output = timeout(
+        *command_timeout,
+        Command::new(ffprobe_bin)
+            .args(["-v", "error", "-rtsp_transport", "tcp", "-show_entries", "stream=width,height", "-of", "json"])
+            .arg(rtsp_url)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output(),
+    )
+    .await
+    .context("ffprobe timed out")??;
+
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        return Err(anyhow!("ffprobe failed: {}", if error.is_empty() { "unknown error" } else { &error }));
+    }
+
+    let report: ProbeReport = serde_json::from_slice(&output.stdout).context("parse ffprobe metadata")?;
+    let stream = report.streams.into_iter().next().context("RTSP stream has no video streams")?;
+    let width = stream.width.context("probed stream missing width")?;
+    let height = stream.height.context("probed stream missing height")?;
+    Ok((width, height))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,5 +352,19 @@ mod tests {
         assert_eq!(stream.codec_name.as_deref(), Some("h264"));
         assert_eq!(stream.width, Some(1920));
         assert_eq!(stream.frame_rate.as_deref(), Some("25/1"));
+    }
+
+    #[test]
+    fn ingestor_default_config() {
+        let config = IngestorConfig::default();
+        assert_eq!(config.ffmpeg_bin, "ffmpeg");
+        assert!(config.fps > 0.0);
+        assert!(config.reconnect_max > config.reconnect_initial);
+    }
+
+    #[test]
+    fn decoded_frame_holds_rgb24_data() {
+        let frame = DecodedFrame { width: 2, height: 2, data: vec![255u8; 12] };
+        assert_eq!(frame.data.len(), (frame.width * frame.height * 3) as usize);
     }
 }

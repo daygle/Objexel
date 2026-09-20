@@ -1,5 +1,6 @@
 use objexel_api::{router, AppState};
-use objexel_camera::CameraService;
+use objexel_camera::{CameraService, FrameIngestor, IngestorConfig};
+use objexel_detector::FrameTensor;
 use objexel_pipeline::ObservationPipeline;
 use objexel_playback::PlaybackService;
 use objexel_recorder::{Recorder, RecorderConfig};
@@ -76,6 +77,11 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
+    let ingestor_fps: f64 = env::var("OBJEXEL_INGEST_FPS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(5.0);
+
     let pipeline = database.as_ref().map(|database| ObservationPipeline::new(database.clone(), recorder.clone()));
     if let Some(pipeline) = &pipeline {
         let model_root = env::var("OBJEXEL_MODEL_DIR").unwrap_or_else(|_| "/models".into());
@@ -114,6 +120,36 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
+    // --- Live frame ingestion ---------------------------------------------------
+    if let (Some(database), Some(pipeline)) = (&database, &pipeline) {
+        let ingestor = FrameIngestor::new(IngestorConfig { fps: ingestor_fps, ..IngestorConfig::default() });
+        for camera in database.list_cameras().await? {
+            if !camera.enabled { continue; }
+            let pipeline = pipeline.clone();
+            let camera_id = camera.id;
+            ingestor.spawn(camera_id, &camera.rtsp_url, move |frame| {
+                let pipeline = pipeline.clone();
+                async move {
+                    let tensor = FrameTensor {
+                        camera_id,
+                        observed_at: chrono::Utc::now(),
+                        shape: vec![1, 3, frame.height as usize, frame.width as usize],
+                        data: frame.data.iter().map(|&pixel| pixel as f32 / 255.0).collect(),
+                    };
+                    match pipeline.process_frame(tensor).await {
+                        Ok(result) => {
+                            tracing::debug!(camera_id = %camera_id, detections = result.detections.len(), "live frame processed");
+                        }
+                        Err(error) => {
+                            tracing::warn!(camera_id = %camera_id, %error, "live frame processing failed");
+                        }
+                    }
+                }
+            });
+            tracing::info!(camera_id = %camera_id, fps = ingestor_fps, "live frame ingestor started");
+        }
+    }
+
     let app = router(AppState { database, camera_service, pipeline, recorder, playback });
     let address = env::var("OBJEXEL_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into());
     let listener = TcpListener::bind(&address).await?;
