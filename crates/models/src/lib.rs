@@ -69,6 +69,25 @@ impl ModelRegistry {
 fn safe_name(value:&str)->String { value.chars().map(|c| if c.is_ascii_alphanumeric()||matches!(c,'-'|'_'|'.'){c}else{'_'}).collect() }
 fn find_onnx(root:&Path)->Result<PathBuf>{ for e in walk(root)? { if e.extension().and_then(|v|v.to_str())==Some("onnx"){return Ok(e)} } bail!("archive did not contain an ONNX model") }
 fn walk(root:&Path)->Result<Vec<PathBuf>>{ let mut out=Vec::new(); for e in fs::read_dir(root)? { let p=e?.path(); if p.is_dir(){out.extend(walk(&p)?)}else{out.push(p)} } Ok(out) }
-fn extract_tar<R:std::io::Read>(reader:R, target:&Path)->Result<()> { let mut archive=tar::Archive::new(reader); for item in archive.entries()? { let mut item=item?; let path=item.path()?.into_owned(); if path.components().any(|c|matches!(c,std::path::Component::ParentDir)){bail!("archive contains unsafe path")} item.unpack(target.join(path))?; } Ok(()) }
+fn extract_tar<R:std::io::Read>(reader:R, target:&Path)->Result<()> {
+    let mut archive = tar::Archive::new(reader);
+    for item in archive.entries()? {
+        let mut item = item?;
+        let path = item.path()?.into_owned();
+        if path.is_absolute()
+            || path
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_)))
+        {
+            bail!("archive contains unsafe path");
+        }
+        let destination = target.join(&path);
+        if !destination.starts_with(target) {
+            bail!("archive contains unsafe path");
+        }
+        item.unpack(destination)?;
+    }
+    Ok(())
+}
 pub fn model_config_from_create(id:Uuid,input:CreateModel)->ModelConfig{ModelConfig{id,name:input.name,version:input.version,model_type:input.model_type,path:input.path.into(),input_width:input.input_width,input_height:input.input_height,labels:input.class_list,confidence_threshold:0.25}}
 #[cfg(test)] mod tests { use super::*; #[test] fn profiles_are_ordered(){assert!(InferenceProfile::Fast.confidence_threshold()>InferenceProfile::Accurate.confidence_threshold())} #[test] fn safe_names_remove_separators(){assert_eq!(safe_name("../../x"),".._.._x")} }

@@ -72,7 +72,13 @@ pub fn generate_csrf_token() -> String { generate_token() }
 mod tests {
     use super::*;
     #[test]
-    fn argon2id_round_trip() { let hash = hash_password("correct horse battery staple").unwrap(); assert!(verify_password("correct horse battery staple", &hash)); assert!(!verify_password("wrong password", &hash)); }
+    fn argon2id_round_trip() {
+        let password: String = std::iter::repeat_n('a', 32).collect();
+        let wrong_password: String = std::iter::repeat_n('b', 32).collect();
+        let hash = hash_password(&password).unwrap();
+        assert!(verify_password(&password, &hash));
+        assert!(!verify_password(&wrong_password, &hash));
+    }
     #[test]
     fn tokens_are_unpredictable_and_digestable() { let token = generate_token(); assert_eq!(token.len(), 64); assert_ne!(token, generate_token()); assert_eq!(digest_token(&token).len(), 64); }
     #[test]
