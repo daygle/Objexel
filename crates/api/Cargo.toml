@@ -10,6 +10,7 @@ chrono.workspace = true
 axum.workspace = true
 objexel-actions = { path = "../actions" }
 objexel-analytics = { path = "../analytics" }
+objexel-behaviour = { path = "../behaviour" }
 objexel-camera = { path = "../camera" }
 objexel-common = { path = "../common" }
 objexel-database = { path = "../database" }

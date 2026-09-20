@@ -12,6 +12,8 @@ pub struct AnalyticsSummary {
     pub detections: i64,
     pub events: i64,
     pub observations: i64,
+    #[serde(default)]
+    pub behaviours: i64,
     pub top_objects: Vec<AnalyticsMetric>,
     pub camera_activity: Vec<AnalyticsMetric>,
     pub zone_activity: Vec<AnalyticsMetric>,

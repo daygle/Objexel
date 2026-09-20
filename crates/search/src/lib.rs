@@ -12,6 +12,7 @@ pub struct SearchFilters {
     pub zone_id: Option<Uuid>,
     pub confidence_min: Option<f32>,
     pub observation_type: Option<String>,
+    pub behaviour_type: Option<String>,
     pub event_type: Option<String>,
     pub model_id: Option<Uuid>,
     pub limit: Option<i64>,

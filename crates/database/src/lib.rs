@@ -1,5 +1,6 @@
 use anyhow::Context;
 use objexel_analytics::{AnalyticsMetric, AnalyticsSnapshot, AnalyticsSummary};
+use objexel_behaviour::Behaviour;
 use objexel_search::{SearchFilters, SearchResult};
 use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, Clip, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, CreateZone, Detection, Event, EventSeverity, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, RuleCondition, RuleConditionInput, Snapshot, Track, UpdateAction, UpdateCamera, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent, ZoneEventType};
 use serde_json::Value;
@@ -289,15 +290,15 @@ impl Database {
     async fn replace_rule_conditions(&self, rule_id: Uuid, conditions: Vec<RuleConditionInput>) -> anyhow::Result<()> {
         sqlx::query("DELETE FROM rule_conditions WHERE rule_id=$1").bind(rule_id).execute(&self.pool).await?;
         for condition in conditions {
-            sqlx::query("INSERT INTO rule_conditions (id,rule_id,object_class,zone_id,observation_type,confidence_threshold,minimum_duration_ms) VALUES ($1,$2,$3,$4,$5,$6,$7)")
-                .bind(Uuid::new_v4()).bind(rule_id).bind(condition.object_class).bind(condition.zone_id).bind(condition.observation_type).bind(condition.confidence_threshold).bind(condition.minimum_duration_ms).execute(&self.pool).await?;
+            sqlx::query("INSERT INTO rule_conditions (id,rule_id,object_class,zone_id,observation_type,behaviour_type,confidence_threshold,minimum_duration_ms) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
+                .bind(Uuid::new_v4()).bind(rule_id).bind(condition.object_class).bind(condition.zone_id).bind(condition.observation_type).bind(condition.behaviour_type).bind(condition.confidence_threshold).bind(condition.minimum_duration_ms).execute(&self.pool).await?;
         }
         Ok(())
     }
 
     async fn rule_from_row(&self, row: sqlx::postgres::PgRow) -> anyhow::Result<Rule> {
         let id: Uuid = row.try_get("id")?;
-        let condition_rows = sqlx::query("SELECT id,rule_id,object_class,zone_id,observation_type,confidence_threshold,minimum_duration_ms FROM rule_conditions WHERE rule_id=$1").bind(id).fetch_all(&self.pool).await?;
+        let condition_rows = sqlx::query("SELECT id,rule_id,object_class,zone_id,observation_type,behaviour_type,confidence_threshold,minimum_duration_ms FROM rule_conditions WHERE rule_id=$1").bind(id).fetch_all(&self.pool).await?;
         let conditions = condition_rows.into_iter().map(condition_from_row).collect::<anyhow::Result<Vec<_>>>()?;
         let action_rows = sqlx::query("SELECT action_id FROM rule_actions WHERE rule_id=$1").bind(id).fetch_all(&self.pool).await?;
         let action_ids = action_rows.into_iter().map(|action| action.try_get("action_id")).collect::<Result<Vec<Uuid>, _>>()?;
@@ -497,17 +498,39 @@ impl Database {
         let detections: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM detections WHERE ($1::timestamptz IS NULL OR observed_at >= $1) AND ($2::timestamptz IS NULL OR observed_at <= $2)").bind(from).bind(to).fetch_one(&self.pool).await?;
         let events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM events WHERE ($1::timestamptz IS NULL OR created_at >= $1) AND ($2::timestamptz IS NULL OR created_at <= $2)").bind(from).bind(to).fetch_one(&self.pool).await?;
         let observations: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM observations WHERE ($1::timestamptz IS NULL OR created_at >= $1) AND ($2::timestamptz IS NULL OR created_at <= $2)").bind(from).bind(to).fetch_one(&self.pool).await?;
+        let behaviours: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM behaviours WHERE ($1::timestamptz IS NULL OR end_time >= $1) AND ($2::timestamptz IS NULL OR end_time <= $2)").bind(from).bind(to).fetch_one(&self.pool).await?;
         let object_rows = sqlx::query("SELECT object_class,COUNT(*) AS count FROM detections WHERE ($1::timestamptz IS NULL OR observed_at >= $1) AND ($2::timestamptz IS NULL OR observed_at <= $2) GROUP BY object_class ORDER BY count DESC LIMIT 10").bind(from).bind(to).fetch_all(&self.pool).await?;
         let camera_rows = sqlx::query("SELECT c.name,COUNT(*) AS count FROM detections d JOIN cameras c ON c.id=d.camera_id WHERE ($1::timestamptz IS NULL OR d.observed_at >= $1) AND ($2::timestamptz IS NULL OR d.observed_at <= $2) GROUP BY c.name ORDER BY count DESC LIMIT 10").bind(from).bind(to).fetch_all(&self.pool).await?;
         let daily_rows = sqlx::query("SELECT TO_CHAR(DATE_TRUNC('day',observed_at),'YYYY-MM-DD') AS label,COUNT(*) AS count FROM detections WHERE ($1::timestamptz IS NULL OR observed_at >= $1) AND ($2::timestamptz IS NULL OR observed_at <= $2) GROUP BY 1 ORDER BY 1").bind(from).bind(to).fetch_all(&self.pool).await?;
         let zone_rows = sqlx::query("SELECT z.name,COUNT(*) AS count FROM zone_events ze JOIN zones z ON z.id=ze.zone_id WHERE ($1::timestamptz IS NULL OR ze.occurred_at >= $1) AND ($2::timestamptz IS NULL OR ze.occurred_at <= $2) GROUP BY z.name ORDER BY count DESC LIMIT 10").bind(from).bind(to).fetch_all(&self.pool).await?;
         let model_rows = sqlx::query("SELECT COALESCE(m.name,'unknown') AS name,COUNT(*) AS count FROM detections d LEFT JOIN models m ON m.id=d.model_id WHERE ($1::timestamptz IS NULL OR d.observed_at >= $1) AND ($2::timestamptz IS NULL OR d.observed_at <= $2) GROUP BY 1 ORDER BY count DESC LIMIT 10").bind(from).bind(to).fetch_all(&self.pool).await?;
-        Ok(AnalyticsSummary { from, to, detections, events, observations, top_objects: metric_rows(object_rows, "object_class")?, camera_activity: metric_rows(camera_rows, "name")?, zone_activity: metric_rows(zone_rows, "name")?, model_activity: metric_rows(model_rows, "name")?, detections_per_day: metric_rows(daily_rows, "label")? })
+        Ok(AnalyticsSummary { from, to, detections, events, observations, behaviours, top_objects: metric_rows(object_rows, "object_class")?, camera_activity: metric_rows(camera_rows, "name")?, zone_activity: metric_rows(zone_rows, "name")?, model_activity: metric_rows(model_rows, "name")?, detections_per_day: metric_rows(daily_rows, "label")? })
     }
 
     pub async fn list_analytics_snapshots(&self, limit: i64) -> anyhow::Result<Vec<AnalyticsSnapshot>> {
         let rows = sqlx::query("SELECT id,period,period_start,summary,created_at FROM analytics_snapshots ORDER BY period_start DESC LIMIT $1").bind(limit.clamp(1,500)).fetch_all(&self.pool).await?;
         rows.into_iter().map(|row| Ok(AnalyticsSnapshot { id: row.try_get("id")?, period: row.try_get("period")?, period_start: row.try_get("period_start")?, summary: row.try_get("summary")?, created_at: row.try_get("created_at")? })).collect()
+    }
+
+    pub async fn insert_behaviour(&self, behaviour: &Behaviour) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO behaviours (id,track_id,camera_id,object_class,behaviour_type,confidence,summary,start_time,end_time,recording_id,clip_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (track_id,behaviour_type,end_time) DO NOTHING")
+            .bind(behaviour.id).bind(behaviour.track_id).bind(behaviour.camera_id).bind(&behaviour.object_class).bind(&behaviour.behaviour_type).bind(behaviour.confidence).bind(&behaviour.summary).bind(behaviour.start_time).bind(behaviour.end_time).bind(behaviour.recording_id).bind(behaviour.clip_id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn list_behaviours(&self, limit: i64) -> anyhow::Result<Vec<Behaviour>> {
+        let rows = sqlx::query("SELECT b.id,b.track_id,b.camera_id,b.object_class,b.behaviour_type,b.confidence,b.summary,b.start_time,b.end_time,b.recording_id,b.clip_id FROM behaviours b ORDER BY b.end_time DESC LIMIT $1").bind(limit.clamp(1,500)).fetch_all(&self.pool).await?;
+        rows.into_iter().map(behaviour_from_row).collect()
+    }
+
+    pub async fn get_behaviour(&self, id: Uuid) -> anyhow::Result<Option<Behaviour>> {
+        let row = sqlx::query("SELECT b.id,b.track_id,b.camera_id,b.object_class,b.behaviour_type,b.confidence,b.summary,b.start_time,b.end_time,b.recording_id,b.clip_id FROM behaviours b WHERE b.id=$1").bind(id).fetch_optional(&self.pool).await?;
+        row.map(behaviour_from_row).transpose()
+    }
+
+    pub async fn search_behaviours(&self, filters: &SearchFilters) -> anyhow::Result<Vec<SearchResult>> {
+        let rows = sqlx::query("SELECT id,camera_id,object_class,behaviour_type,summary,end_time,confidence,recording_id,clip_id FROM behaviours WHERE ($1::text IS NULL OR behaviour_type=$1 OR summary ILIKE '%' || $1 || '%' OR object_class ILIKE '%' || $1 || '%') AND ($2::uuid IS NULL OR camera_id=$2) AND ($3::text IS NULL OR object_class=$3) AND ($4::timestamptz IS NULL OR end_time >= $4) AND ($5::timestamptz IS NULL OR end_time <= $5) ORDER BY end_time DESC LIMIT $6").bind(&filters.behaviour_type).bind(filters.camera_id).bind(&filters.object_class).bind(filters.from).bind(filters.to).bind(filters.limit()).fetch_all(&self.pool).await?;
+        rows.into_iter().map(|row| Ok(SearchResult { entity_type: "behaviour".into(), id: row.try_get("id")?, camera_id: row.try_get("camera_id")?, object_class: row.try_get("object_class")?, summary: row.try_get("summary")?, occurred_at: row.try_get("end_time")?, confidence: row.try_get("confidence")?, zone_id: None, model_id: None, recording_id: row.try_get("recording_id")?, clip_id: row.try_get("clip_id")?, snapshot_id: None })).collect()
     }
 
     pub async fn delete_camera(&self, id: Uuid) -> anyhow::Result<bool> {
@@ -571,7 +594,7 @@ fn zone_event_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<ZoneEvent> 
 
 fn zone_event_type_string(event_type: &ZoneEventType) -> &'static str { match event_type { ZoneEventType::Entered => "entered", ZoneEventType::Exited => "exited", ZoneEventType::Occupied => "occupied" } }
 
-fn condition_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<RuleCondition> { Ok(RuleCondition { id: row.try_get("id")?, rule_id: row.try_get("rule_id")?, object_class: row.try_get("object_class")?, zone_id: row.try_get("zone_id")?, observation_type: row.try_get("observation_type")?, confidence_threshold: row.try_get("confidence_threshold")?, minimum_duration_ms: row.try_get("minimum_duration_ms")? }) }
+fn condition_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<RuleCondition> { Ok(RuleCondition { id: row.try_get("id")?, rule_id: row.try_get("rule_id")?, object_class: row.try_get("object_class")?, zone_id: row.try_get("zone_id")?, observation_type: row.try_get("observation_type")?, behaviour_type: row.try_get("behaviour_type")?, confidence_threshold: row.try_get("confidence_threshold")?, minimum_duration_ms: row.try_get("minimum_duration_ms")? }) }
 fn severity_string(severity: &EventSeverity) -> &'static str { match severity { EventSeverity::Info => "info", EventSeverity::Warning => "warning", EventSeverity::Critical => "critical" } }
 fn severity_from_string(value: &str) -> EventSeverity { match value { "warning" => EventSeverity::Warning, "critical" => EventSeverity::Critical, _ => EventSeverity::Info } }
 fn event_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Event> { Ok(Event { id: row.try_get("id")?, rule_id: row.try_get::<Option<Uuid>, _>("rule_id")?.unwrap_or_else(Uuid::nil), camera_id: row.try_get("camera_id")?, track_id: row.try_get("track_id")?, observation_id: row.try_get("observation_id")?, event_type: row.try_get("event_type")?, summary: row.try_get("summary")?, severity: severity_from_string(&row.try_get::<String,_>("severity")?), created_at: row.try_get("created_at")? }) }
@@ -585,6 +608,10 @@ fn template_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<NotificationT
 fn action_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Action> { Ok(Action { id: row.try_get("id")?, name: row.try_get("name")?, action_type: row.try_get("action_type")?, provider_id: row.try_get("provider_id")?, template_id: row.try_get("template_id")?, enabled: row.try_get("enabled")?, configuration: row.try_get("configuration")?, created_at: row.try_get("created_at")?, updated_at: row.try_get("updated_at")? }) }
 fn execution_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<ActionExecution> { Ok(ActionExecution { id: row.try_get("id")?, action_id: row.try_get("action_id")?, event_id: row.try_get("event_id")?, status: row.try_get("status")?, execution_time_ms: row.try_get("execution_time_ms")?, error_message: row.try_get("error_message")?, created_at: row.try_get("created_at")? }) }
 fn notification_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Notification> { Ok(Notification { id: row.try_get("id")?, event_id: row.try_get("event_id")?, title: row.try_get("title")?, body: row.try_get("body")?, read: row.try_get("read")?, created_at: row.try_get("created_at")? }) }
+
+fn behaviour_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Behaviour> {
+    Ok(Behaviour { id: row.try_get("id")?, track_id: row.try_get("track_id")?, camera_id: row.try_get("camera_id")?, object_class: row.try_get("object_class")?, behaviour_type: row.try_get("behaviour_type")?, confidence: row.try_get("confidence")?, summary: row.try_get("summary")?, start_time: row.try_get("start_time")?, end_time: row.try_get("end_time")?, recording_id: row.try_get("recording_id")?, clip_id: row.try_get("clip_id")? })
+}
 
 fn metric_rows(rows: Vec<sqlx::postgres::PgRow>, label_column: &str) -> anyhow::Result<Vec<AnalyticsMetric>> { rows.into_iter().map(|row| Ok(AnalyticsMetric { label: row.try_get(label_column)?, count: row.try_get("count")? })).collect() }
 

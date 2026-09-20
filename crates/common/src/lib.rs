@@ -219,6 +219,7 @@ pub struct RuleCondition {
     pub object_class: Option<String>,
     pub zone_id: Option<Uuid>,
     pub observation_type: Option<String>,
+    pub behaviour_type: Option<String>,
     pub confidence_threshold: Option<f32>,
     pub minimum_duration_ms: Option<i64>,
 }
@@ -262,6 +263,7 @@ pub struct RuleConditionInput {
     pub object_class: Option<String>,
     pub zone_id: Option<Uuid>,
     pub observation_type: Option<String>,
+    pub behaviour_type: Option<String>,
     pub confidence_threshold: Option<f32>,
     pub minimum_duration_ms: Option<i64>,
 }
@@ -418,6 +420,21 @@ pub struct Snapshot {
     pub camera_id: Uuid,
     pub image_path: String,
     pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Behaviour {
+    pub id: Uuid,
+    pub track_id: Uuid,
+    pub camera_id: Uuid,
+    pub object_class: String,
+    pub behaviour_type: String,
+    pub confidence: f32,
+    pub summary: String,
+    pub start_time: DateTime<Utc>,
+    pub end_time: DateTime<Utc>,
+    pub recording_id: Option<Uuid>,
+    pub clip_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
