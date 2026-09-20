@@ -46,7 +46,7 @@ impl Recorder {
             .args(["-map", "0:v:0", "-c:v", "copy", "-an", "-f", "segment", "-reset_timestamps", "1", "-segment_atclocktime", "1"])
             .arg("-segment_time").arg(self.config.segment_seconds.to_string())
             .arg(pattern.to_string_lossy().as_ref())
-            .stdout(Stdio::null()).stderr(Stdio::piped()).spawn().context("start continuous FFmpeg recording")?;
+            .stdout(Stdio::null()).stderr(Stdio::null()).spawn().context("start continuous FFmpeg recording")?;
         Ok((Recording { id: Uuid::new_v4(), camera_id, start_time, end_time: None, file_path: directory.to_string_lossy().into_owned(), file_size: None, mode: "continuous".into() }, child))
     }
 

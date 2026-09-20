@@ -268,7 +268,7 @@ where
                 "pipe:1",
             ])
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::null())
             .spawn()
             .context("spawn ffmpeg")
     })
