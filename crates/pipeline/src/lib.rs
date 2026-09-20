@@ -11,14 +11,15 @@ use objexel_recorder::Recorder;
 use objexel_rules::{ObservationContext, RuleEngine};
 use objexel_tracker::Tracker;
 use objexel_zones::ZoneEvaluator;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct ObservationPipeline {
     pub models: ModelManager,
-    tracker: Arc<Mutex<Tracker>>,
-    zones: Arc<Mutex<ZoneEvaluator>>,
+    trackers: Arc<tokio::sync::RwLock<HashMap<Uuid, Arc<Mutex<Tracker>>>>>,
+    zones: Arc<tokio::sync::RwLock<HashMap<Uuid, Arc<Mutex<ZoneEvaluator>>>>>,
     rules: Arc<Mutex<RuleEngine>>,
     actions: ActionDispatcher,
     observations: ObservationEngine,
@@ -30,7 +31,27 @@ pub struct ObservationPipeline {
 
 impl ObservationPipeline {
     pub fn new(database: Database, recorder: Recorder) -> Self {
-        Self { models: ModelManager::default(), tracker: Arc::new(Mutex::new(Tracker::default())), zones: Arc::new(Mutex::new(ZoneEvaluator::default())), rules: Arc::new(Mutex::new(RuleEngine::default())), actions: ActionDispatcher::new(), observations: ObservationEngine::default(), database, recorder, behaviour: BehaviourAnalyzer::default(), fusion: FusionEngine::default() }
+        Self { models: ModelManager::default(), trackers: Arc::new(tokio::sync::RwLock::new(HashMap::new())), zones: Arc::new(tokio::sync::RwLock::new(HashMap::new())), rules: Arc::new(Mutex::new(RuleEngine::default())), actions: ActionDispatcher::new(), observations: ObservationEngine::default(), database, recorder, behaviour: BehaviourAnalyzer::default(), fusion: FusionEngine::default() }
+    }
+
+    /// Get or create a per-camera Tracker instance.
+    async fn camera_tracker(&self, camera_id: Uuid) -> Arc<Mutex<Tracker>> {
+        {
+            let read = self.trackers.read().await;
+            if let Some(tracker) = read.get(&camera_id) { return tracker.clone(); }
+        }
+        let mut write = self.trackers.write().await;
+        write.entry(camera_id).or_insert_with(|| Arc::new(Mutex::new(Tracker::default()))).clone()
+    }
+
+    /// Get or create a per-camera ZoneEvaluator instance.
+    async fn camera_zones(&self, camera_id: Uuid) -> Arc<Mutex<ZoneEvaluator>> {
+        {
+            let read = self.zones.read().await;
+            if let Some(zones) = read.get(&camera_id) { return zones.clone(); }
+        }
+        let mut write = self.zones.write().await;
+        write.entry(camera_id).or_insert_with(|| Arc::new(Mutex::new(ZoneEvaluator::default()))).clone()
     }
 
     pub async fn process_frame(&self, frame: FrameTensor) -> Result<PipelineResult> {
@@ -50,7 +71,7 @@ impl ObservationPipeline {
         }
         let mut detections = self.fusion.fuse(&assignments, raw_detections);
         let now = detections.first().map(|d| d.observed_at).unwrap_or_else(chrono::Utc::now);
-        let tracks = self.tracker.lock().await.update(&mut detections, now);
+        let tracks = self.camera_tracker(camera_id).await.lock().await.update(&mut detections, now);
         for detection in &detections {
             self.database.insert_detection(detection).await?;
             if !assignments.is_empty() {
@@ -63,7 +84,7 @@ impl ObservationPipeline {
         for behaviour in &behaviours { self.database.insert_behaviour(behaviour).await?; }
         let mut observations: Vec<Observation> = tracks.iter().filter_map(|track| self.observations.from_track(track)).collect();
         let zones = self.database.list_zones(Some(camera_id)).await?;
-        let zone_events = self.zones.lock().await.evaluate(&zones, &tracks, now);
+        let zone_events = self.camera_zones(camera_id).await.lock().await.evaluate(&zones, &tracks, now);
         for event in &zone_events {
             self.database.insert_zone_event(event).await?;
             let zone_name = zones.iter().find(|zone| zone.id == event.zone_id).map(|zone| zone.name.as_str()).unwrap_or("zone");
@@ -78,35 +99,52 @@ impl ObservationPipeline {
         for observation in &observations { self.database.insert_observation(observation).await?; }
         let rules = self.database.list_rules().await?;
         let mut events = Vec::new();
-        let mut rule_engine = self.rules.lock().await;
-        for observation in &observations {
-            let track = tracks.iter().find(|track| track.id == observation.track_id);
-            let detection = detections.iter().find(|detection| detection.track_id == Some(observation.track_id));
-            let zone_id = zone_events.iter().find(|event| event.track_id == observation.track_id).map(|event| event.zone_id);
-            let behaviour_type = behaviours.iter().find(|behaviour| behaviour.track_id == observation.track_id).map(|behaviour| behaviour.behaviour_type.as_str());
-            let identity = match track { Some(track) => Some(self.database.assign_identity(track).await?), None => None };
-            let behaviour = track.and_then(|item| behaviours.iter().find(|candidate| candidate.track_id == item.id));
-            let assessment = identity.as_ref().map(|item| assess(item, behaviour, detection.map(|item| item.confidence).unwrap_or(0.0)));
-            let context = ObservationContext { observation, object_class: track.map(|track| track.object_class.as_str()), zone_id, confidence: detection.map(|detection| detection.confidence), duration_ms: track.map(|track| track.duration_ms), behaviour_type, identity_id: identity.as_ref().map(|item| item.id), familiarity: identity.as_ref().map(|item| item.familiarity.as_str()), priority: assessment.as_ref().map(|item| item.priority.as_str()), anomaly_score: assessment.as_ref().map(|item| item.anomaly_score) };
-            for event in rule_engine.evaluate(&rules, context, now) {
-                self.database.insert_event(&event).await?;
-                if let (Some(identity), Some(assessment)) = (identity.as_ref(), assessment.as_ref()) { self.database.insert_adaptive_scores(identity.id, behaviour.map(|item| item.id), assessment, Some(event.id)).await?; }
-                self.database.insert_notification(&event).await?;
+        // Phase 1: Build observation contexts and evaluate rules (hold rule lock only for evaluate).
+        let mut rule_contexts: Vec<(uuid::Uuid, uuid::Uuid, uuid::Uuid, Option<objexel_adaptive::AdaptiveAssessment>)> = Vec::new();
+        {
+            let mut rule_engine = self.rules.lock().await;
+            for observation in &observations {
+                let track = tracks.iter().find(|track| track.id == observation.track_id);
+                let detection = detections.iter().find(|detection| detection.track_id == Some(observation.track_id));
+                let zone_id = zone_events.iter().find(|event| event.track_id == observation.track_id).map(|event| event.zone_id);
+                let behaviour_type = behaviours.iter().find(|behaviour| behaviour.track_id == observation.track_id).map(|behaviour| behaviour.behaviour_type.as_str());
+                let identity = match track { Some(track) => Some(self.database.assign_identity(track).await?), None => None };
+                let behaviour = track.and_then(|item| behaviours.iter().find(|candidate| candidate.track_id == item.id));
+                let assessment = identity.as_ref().map(|item| assess(item, behaviour, detection.map(|item| item.confidence).unwrap_or(0.0)));
+                let context = ObservationContext { observation, object_class: track.map(|track| track.object_class.as_str()), zone_id, confidence: detection.map(|detection| detection.confidence), duration_ms: track.map(|track| track.duration_ms), behaviour_type, identity_id: identity.as_ref().map(|item| item.id), familiarity: identity.as_ref().map(|item| item.familiarity.as_str()), priority: assessment.as_ref().map(|item| item.priority.as_str()), anomaly_score: assessment.as_ref().map(|item| item.anomaly_score) };
+                let matched = rule_engine.evaluate(&rules, context, now);
+                let identity_id = identity.as_ref().map(|item| item.id);
+                let behaviour_id = behaviour.map(|item| item.id);
+                for event in matched {
+                    rule_contexts.push((event.id, identity_id.unwrap_or_default(), behaviour_id.unwrap_or_default(), assessment));
+                    events.push(event);
+                }
+            }
+        } // Rule lock released here.
+        // Phase 2: Persist events and dispatch actions (no rule lock held).
+        for (event_id, identity_id, behaviour_id, assessment) in rule_contexts {
+            if let Some(event) = events.iter().find(|e| e.id == event_id) {
+                if !identity_id.is_nil() {
+                    if let Some(ref assessment) = assessment {
+                        self.database.insert_adaptive_scores(identity_id, Some(behaviour_id), assessment, Some(event.id)).await?;
+                    }
+                }
+                self.database.insert_notification(event).await?;
                 if let Some(camera) = self.database.get_camera(event.camera_id).await? {
                     let recorder = self.recorder.clone();
                     let database = self.database.clone();
-                    let event_id = event.id;
-                    let camera_id = event.camera_id;
+                    let eid = event.id;
+                    let cam_id = event.camera_id;
                     let rtsp_url = camera.rtsp_url;
                     let event_time = event.created_at;
                     tokio::spawn(async move {
-                        match recorder.create_event_clip(camera_id, event_id, &rtsp_url, event_time).await {
-                            Ok(clip) => if let Err(error) = database.insert_clip(&clip).await { tracing::warn!(event_id = %event_id, %error, "event clip metadata insert failed"); },
-                            Err(error) => tracing::warn!(event_id = %event_id, %error, "event clip generation failed"),
+                        match recorder.create_event_clip(cam_id, eid, &rtsp_url, event_time).await {
+                            Ok(clip) => if let Err(error) = database.insert_clip(&clip).await { tracing::warn!(event_id = %eid, %error, "event clip metadata insert failed"); },
+                            Err(error) => tracing::warn!(event_id = %eid, %error, "event clip generation failed"),
                         }
-                        match recorder.create_snapshot(camera_id, Some(event_id), &rtsp_url, event_time).await {
-                            Ok(snapshot) => if let Err(error) = database.insert_snapshot(&snapshot).await { tracing::warn!(event_id = %event_id, %error, "event snapshot metadata insert failed"); },
-                            Err(error) => tracing::warn!(event_id = %event_id, %error, "event snapshot generation failed"),
+                        match recorder.create_snapshot(cam_id, Some(eid), &rtsp_url, event_time).await {
+                            Ok(snapshot) => if let Err(error) = database.insert_snapshot(&snapshot).await { tracing::warn!(event_id = %eid, %error, "event snapshot metadata insert failed"); },
+                            Err(error) => tracing::warn!(event_id = %eid, %error, "event snapshot generation failed"),
                         }
                     });
                 }
@@ -114,10 +152,9 @@ impl ObservationPipeline {
                 for action in actions {
                     let provider = match action.provider_id { Some(id) => self.database.provider(id).await?, None => None };
                     let template = match action.template_id { Some(id) => self.database.template(id).await?, None => None };
-                    let execution = self.actions.execute(&action, provider.as_ref(), template.as_ref(), &event).await;
+                    let execution = self.actions.execute(&action, provider.as_ref(), template.as_ref(), event).await;
                     self.database.insert_execution(&execution).await?;
                 }
-                events.push(event);
             }
         }
         tracing::debug!(camera_id = %camera_id, detections = detections.len(), tracks = tracks.len(), behaviours = behaviours.len(), zone_events = zone_events.len(), observations = observations.len(), events = events.len(), "frame processed");
