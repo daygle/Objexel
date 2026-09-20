@@ -8,9 +8,9 @@ use axum::{
 };
 use chrono::Utc;
 use objexel_camera::{CameraManager, CameraService};
-use objexel_common::{Camera, CameraStatus, CameraTestResult, CreateCamera, CreateRule, CreateZone, Detection, Event, HealthResponse, Model, Observation, Rule, StreamMetadata, Track, UpdateCamera, UpdateRule, UpdateZone, Zone, ZoneEvent};
-use objexel_detector::ModelConfig;
+use objexel_common::{BenchmarkResult, Camera, CameraStatus, CameraTestResult, CreateCamera, CreateModel, CreateRule, CreateZone, Detection, Event, HealthResponse, Model, Observation, Rule, StreamMetadata, Track, UpdateCamera, UpdateRule, UpdateZone, Zone, ZoneEvent};
 use objexel_pipeline::ObservationPipeline;
+use objexel_models::ModelRegistry;
 use objexel_zones::validate_polygon;
 use objexel_database::Database;
 use serde_json::{json, Value};
@@ -28,8 +28,8 @@ pub struct AppState {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, list_models, reload_models, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
-    components(schemas(Camera, CreateCamera, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
+    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
+    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, BenchmarkResult, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
     tags((name = "cameras", description = "Camera management and RTSP ingestion"))
 )]
 pub struct ApiDoc;
@@ -41,11 +41,13 @@ pub fn router(state: AppState) -> Router {
         .route("/api/cameras/:id/test", axum::routing::post(test_camera))
         .route("/api/cameras/:id/snapshot", get(snapshot_camera).post(snapshot_camera))
         .route("/api/cameras/:id/status", get(camera_status))
+        .route("/api/cameras/:id/model/:model_id", axum::routing::post(assign_camera_model))
         .route("/api/v1/cameras", get(list_cameras).post(create_camera))
         .route("/api/v1/cameras/:id", get(get_camera).put(update_camera).patch(update_camera).delete(delete_camera))
         .route("/api/v1/cameras/:id/test", axum::routing::post(test_camera))
         .route("/api/v1/cameras/:id/snapshot", get(snapshot_camera).post(snapshot_camera))
-        .route("/api/v1/cameras/:id/status", get(camera_status));
+        .route("/api/v1/cameras/:id/status", get(camera_status))
+        .route("/api/v1/cameras/:id/model/:model_id", axum::routing::post(assign_camera_model));
 
     Router::new()
         .route("/health", get(health))
@@ -53,8 +55,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/openapi.json", get(openapi))
         .route("/api/v1/openapi.json", get(openapi))
         .route("/api/v1/events", get(events_socket))
-        .route("/api/models", get(list_models))
+        .route("/api/models", get(list_models).post(create_model))
+        .route("/api/models/:id", get(get_model).delete(delete_model))
         .route("/api/models/reload", axum::routing::post(reload_models))
+        .route("/api/models/:id/activate", axum::routing::post(activate_model))
+        .route("/api/models/:id/benchmark", axum::routing::post(benchmark_model))
+        .route("/api/benchmarks", get(list_benchmarks))
         .route("/api/detections", get(list_detections))
         .route("/api/detections/:id", get(get_detection))
         .route("/api/tracks", get(list_tracks))
@@ -161,6 +167,15 @@ async fn camera_status(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>)
     match database(&state)?.get_camera(id).await.map_err(internal_error)? { Some(camera) => Ok(Json(camera)), None => Err(not_found("camera not found")) }
 }
 
+#[utoipa::path(post, path = "/api/cameras/{id}/model/{model_id}", tag = "models", params(("id" = Uuid, Path), ("model_id" = Uuid, Path)), responses((status = 200), (status = 404), (status = 503)))]
+async fn assign_camera_model(State(state): State<Arc<AppState>>, Path((id, model_id)): Path<(Uuid, Uuid)>) -> Result<Json<Value>, ErrorResponse> {
+    if database(&state)?.get_camera(id).await.map_err(internal_error)?.is_none() { return Err(not_found("camera not found")); }
+    let model = database(&state)?.get_model(model_id).await.map_err(internal_error)?.ok_or_else(|| not_found("model not found"))?;
+    if !model.enabled { return Err(bad_request("cannot assign a disabled model")); }
+    database(&state)?.assign_camera_model(id, model_id).await.map_err(internal_error)?;
+    Ok(Json(json!({"camera_id": id, "model_id": model_id})))
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct LimitQuery { limit: Option<i64> }
 
@@ -169,14 +184,42 @@ async fn list_models(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Mode
     database(&state)?.list_models().await.map(Json).map_err(internal_error)
 }
 
-#[utoipa::path(post, path = "/api/models/reload", tag = "models", responses((status = 200), (status = 503)))]
+#[utoipa::path(get, path = "/api/models/{id}", tag = "models", params(("id" = Uuid, Path)), responses((status = 200, body = Model), (status = 404), (status = 503)))]
+async fn get_model(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Model>, ErrorResponse> { match database(&state)?.get_model(id).await.map_err(internal_error)? { Some(model) => Ok(Json(model)), None => Err(not_found("model not found")) } }
+
+#[utoipa::path(post, path = "/api/models", tag = "models", request_body = CreateModel, responses((status = 201, body = Model), (status = 400), (status = 503)))]
+async fn create_model(State(state): State<Arc<AppState>>, Json(input): Json<CreateModel>) -> Result<(StatusCode, Json<Model>), ErrorResponse> {
+    ModelRegistry::validate(input.path.as_ref(), input.input_width, input.input_height).await.map_err(|error| bad_request(&error.to_string()))?;
+    database(&state)?.create_model(input).await.map(|model| (StatusCode::CREATED, Json(model))).map_err(internal_error)
+}
+
+#[utoipa::path(delete, path = "/api/models/{id}", tag = "models", params(("id" = Uuid, Path)), responses((status = 204), (status = 404), (status = 503)))]
+async fn delete_model(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<StatusCode, ErrorResponse> { if database(&state)?.delete_model(id).await.map_err(internal_error)? { Ok(StatusCode::NO_CONTENT) } else { Err(not_found("model not found")) } }
+
+#[utoipa::path(post, path = "/api/models/{id}/activate", tag = "models", params(("id" = Uuid, Path)), responses((status = 200), (status = 404), (status = 503)))]
+async fn activate_model(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Value>, ErrorResponse> { if database(&state)?.activate_model(id).await.map_err(internal_error)? { if let Some(pipeline) = &state.pipeline { let _ = pipeline.models.set_active(id).await; } Ok(Json(json!({"active": id}))) } else { Err(not_found("model not found or disabled")) } }
+
+#[utoipa::path(post, path = "/api/models/{id}/benchmark", tag = "models", params(("id" = Uuid, Path)), responses((status = 200, body = BenchmarkResult), (status = 404), (status = 503)))]
+async fn benchmark_model(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<BenchmarkResult>, ErrorResponse> {
+    let model = database(&state)?.get_model(id).await.map_err(internal_error)?.ok_or_else(|| not_found("model not found"))?;
+    let pipeline = state.pipeline.as_ref().ok_or_else(|| service_unavailable("inference pipeline is not configured"))?;
+    let registry = ModelRegistry::new("/models", pipeline.models.clone());
+    let result = registry.benchmark(&model, 10).await.map_err(|error| bad_request(&error.to_string()))?;
+    database(&state)?.insert_benchmark(&result).await.map_err(internal_error)?;
+    Ok(Json(result))
+}
+
+#[utoipa::path(get, path = "/api/benchmarks", tag = "models", responses((status = 200, body = [BenchmarkResult]), (status = 503)))]
+async fn list_benchmarks(State(state): State<Arc<AppState>>) -> Result<Json<Vec<BenchmarkResult>>, ErrorResponse> { database(&state)?.list_benchmarks(None).await.map(Json).map_err(internal_error) }
+
+#[utoipa::path(post, path = "/api/models/reload", tag = "models", responses((status = 200), (status = 400), (status = 503)))]
 async fn reload_models(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ErrorResponse> {
-    let pipeline = state.pipeline.as_ref().ok_or_else(|| service_unavailable("database is not configured"))?;
+    let pipeline = state.pipeline.as_ref().ok_or_else(|| service_unavailable("inference pipeline is not configured"))?;
     let models = database(&state)?.list_models().await.map_err(internal_error)?;
-    let mut loaded = 0;
-    for model in models {
-        pipeline.models.load(ModelConfig { id: model.id, name: model.name, version: model.version, path: model.path.into(), labels: Vec::new(), confidence_threshold: 0.25 }).await.map_err(internal_error)?;
-        loaded += 1;
+    let registry = ModelRegistry::new("/models", pipeline.models.clone());
+    let loaded = registry.load_registered(&models).await.map_err(|error| bad_request(&error.to_string()))?;
+    if let Some(default_model) = models.iter().find(|model| model.default_model && model.enabled) {
+        pipeline.models.set_active(default_model.id).await.map_err(|error| bad_request(&error.to_string()))?;
     }
     Ok(Json(json!({"loaded": loaded})))
 }

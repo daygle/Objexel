@@ -12,7 +12,10 @@ pub struct ModelConfig {
     pub id: Uuid,
     pub name: String,
     pub version: String,
+    pub model_type: String,
     pub path: PathBuf,
+    pub input_width: u32,
+    pub input_height: u32,
     #[serde(default)]
     pub labels: Vec<String>,
     #[serde(default = "default_confidence")]
@@ -44,7 +47,12 @@ impl ModelManager {
     pub async fn load(&self, config: ModelConfig) -> Result<()> {
         validate_model_config(&config)?;
         let mut builder = Session::builder().context("create ONNX Runtime session builder")?;
-        builder = builder.with_execution_providers([ep::CUDA::default().build()])?;
+        // Prefer CUDA when available, while retaining the built-in CPU provider as a
+        // portable fallback for N100 and other CPU-only hosts.
+        builder = builder.with_execution_providers([
+            ep::CUDA::default().build(),
+            ep::CPU::default().build(),
+        ])?;
         let session = builder.commit_from_file(&config.path).with_context(|| format!("load ONNX model {}", config.path.display()))?;
         let loaded = Arc::new(LoadedModel { config: config.clone(), session: Mutex::new(session) });
         self.models.write().await.insert(config.id, loaded);
@@ -69,13 +77,30 @@ impl ModelManager {
         self.models.read().await.get(&id).map(|model| model.config.clone())
     }
 
-    async fn active_model(&self) -> Result<Arc<LoadedModel>> {
-        let id = (*self.active.read().await).context("no active ONNX model")?;
-        self.models.read().await.get(&id).cloned().context("active ONNX model is not loaded")
+    pub async fn model_config(&self, model_id: Uuid) -> Option<ModelConfig> {
+        self.models.read().await.get(&model_id).map(|model| model.config.clone())
     }
 
-    pub async fn detect(&self, frame: FrameTensor) -> Result<Vec<Detection>> {
-        let model = self.active_model().await?;
+    /// Run one deterministic zero-filled inference for the benchmark engine.
+    pub async fn benchmark_once(&self, model_id: Uuid, width: u32, height: u32) -> Result<()> {
+        let frame = FrameTensor {
+            camera_id: Uuid::nil(),
+            observed_at: chrono::Utc::now(),
+            shape: vec![1, 3, height as usize, width as usize],
+            data: vec![0.0; 3 * width as usize * height as usize],
+        };
+        self.detect_with_model(Some(model_id), frame).await.map(|_| ())
+    }
+
+    async fn active_model(&self, model_id: Option<Uuid>) -> Result<Arc<LoadedModel>> {
+        let id = match model_id { Some(id) => id, None => (*self.active.read().await).context("no active ONNX model")? };
+        self.models.read().await.get(&id).cloned().context("selected ONNX model is not loaded")
+    }
+
+    pub async fn detect(&self, frame: FrameTensor) -> Result<Vec<Detection>> { self.detect_with_model(None, frame).await }
+
+    pub async fn detect_with_model(&self, model_id: Option<Uuid>, frame: FrameTensor) -> Result<Vec<Detection>> {
+        let model = self.active_model(model_id).await?;
         let config = model.config.clone();
         let input = ArrayD::from_shape_vec(IxDyn(&frame.shape), frame.data).context("invalid detector tensor shape")?;
         let mut session = model.session.lock().map_err(|_| anyhow::anyhow!("ONNX session lock poisoned"))?;
@@ -100,6 +125,7 @@ impl ModelManager {
 
 fn validate_model_config(config: &ModelConfig) -> Result<()> {
     if config.path.extension().and_then(|ext| ext.to_str()) != Some("onnx") { bail!("model path must have an .onnx extension"); }
+    if config.input_width == 0 || config.input_height == 0 { bail!("model input dimensions must be positive"); }
     if !(0.0..=1.0).contains(&config.confidence_threshold) { bail!("confidence threshold must be between 0 and 1"); }
     if !Path::new(&config.path).is_file() { bail!("model file does not exist: {}", config.path.display()); }
     Ok(())
@@ -110,13 +136,13 @@ mod tests {
     use super::*;
     #[test]
     fn model_validation_rejects_invalid_threshold() {
-        let config = ModelConfig { id: Uuid::new_v4(), name: "test".into(), version: "1".into(), path: "model.onnx".into(), labels: vec![], confidence_threshold: 1.1 };
+        let config = ModelConfig { id: Uuid::new_v4(), name: "test".into(), version: "1".into(), model_type: "yolo".into(), path: "model.onnx".into(), input_width: 640, input_height: 640, labels: vec![], confidence_threshold: 1.1 };
         assert!(validate_model_config(&config).is_err());
     }
 
     #[test]
     fn model_validation_requires_onnx_extension() {
-        let config = ModelConfig { id: Uuid::new_v4(), name: "test".into(), version: "1".into(), path: "model.bin".into(), labels: vec![], confidence_threshold: 0.5 };
+        let config = ModelConfig { id: Uuid::new_v4(), name: "test".into(), version: "1".into(), model_type: "yolo".into(), path: "model.bin".into(), input_width: 640, input_height: 640, labels: vec![], confidence_threshold: 0.5 };
         assert!(validate_model_config(&config).is_err());
     }
 }

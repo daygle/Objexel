@@ -26,7 +26,8 @@ impl ObservationPipeline {
 
     pub async fn process_frame(&self, frame: FrameTensor) -> Result<PipelineResult> {
         let camera_id = frame.camera_id;
-        let mut detections = self.models.detect(frame).await?;
+        let selected_model = self.database.active_model_for_camera(camera_id).await?;
+        let mut detections = self.models.detect_with_model(selected_model, frame).await?;
         let now = detections.first().map(|d| d.observed_at).unwrap_or_else(chrono::Utc::now);
         let tracks = self.tracker.lock().await.update(&mut detections, now);
         for detection in &detections { self.database.insert_detection(detection).await?; }

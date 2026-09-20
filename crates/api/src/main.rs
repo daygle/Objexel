@@ -1,6 +1,7 @@
 use objexel_api::{router, AppState};
 use objexel_camera::CameraService;
 use objexel_pipeline::ObservationPipeline;
+use objexel_models::ModelRegistry;
 use objexel_database::Database;
 use std::env;
 use tokio::net::TcpListener;
@@ -43,6 +44,43 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     let pipeline = database.as_ref().map(|database| ObservationPipeline::new(database.clone()));
+    if let Some(pipeline) = &pipeline {
+        let model_root = env::var("OBJEXEL_MODEL_DIR").unwrap_or_else(|_| "/models".into());
+        let registry = ModelRegistry::new(model_root, pipeline.models.clone());
+        if let Some(database) = &database {
+            match registry.discover().await {
+                Ok(discovered) => {
+                    let existing = database.list_models().await.unwrap_or_default();
+                    for (index, config) in discovered.into_iter().enumerate() {
+                        if existing.iter().any(|model| model.path == config.path.to_string_lossy()) { continue; }
+                        let input = objexel_common::CreateModel {
+                            name: config.name,
+                            version: config.version,
+                            model_type: config.model_type,
+                            path: config.path.to_string_lossy().into_owned(),
+                            input_width: config.input_width,
+                            input_height: config.input_height,
+                            class_list: config.labels,
+                            enabled: true,
+                            default_model: existing.is_empty() && index == 0,
+                        };
+                        if let Err(error) = database.create_model(input).await {
+                            tracing::warn!(%error, "could not register discovered model");
+                        }
+                    }
+                    match database.list_models().await {
+                        Ok(models) => {
+                            if let Err(error) = registry.load_registered(&models).await {
+                                tracing::warn!(%error, "registered model loading failed; models can still be reloaded through the API");
+                            }
+                        }
+                        Err(error) => tracing::warn!(%error, "could not read registered models during startup"),
+                    }
+                }
+                Err(error) => tracing::warn!(%error, "model discovery failed; models can still be loaded through the API"),
+            }
+        }
+    }
     let app = router(AppState { database, camera_service, pipeline });
     let address = env::var("OBJEXEL_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into());
     let listener = TcpListener::bind(&address).await?;

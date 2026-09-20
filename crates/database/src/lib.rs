@@ -1,5 +1,5 @@
 use anyhow::Context;
-use objexel_common::{Camera, CameraStatus, CreateCamera, CreateRule, CreateZone, Detection, Event, EventSeverity, Model, Observation, Rule, RuleCondition, RuleConditionInput, Track, UpdateCamera, UpdateRule, UpdateZone, Zone, ZoneEvent, ZoneEventType};
+use objexel_common::{BenchmarkResult, Camera, CameraStatus, CreateCamera, CreateModel, CreateRule, CreateZone, Detection, Event, EventSeverity, Model, Observation, Rule, RuleCondition, RuleConditionInput, Track, UpdateCamera, UpdateRule, UpdateZone, Zone, ZoneEvent, ZoneEventType};
 use serde_json::Value;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use uuid::Uuid;
@@ -28,7 +28,7 @@ impl Database {
 
     pub async fn list_cameras(&self) -> anyhow::Result<Vec<Camera>> {
         let rows = sqlx::query(
-            "SELECT id, name, rtsp_url, enabled, status, last_connected_at, last_snapshot_at, last_error, created_at, updated_at FROM cameras ORDER BY name",
+            "SELECT c.id, c.name, c.rtsp_url, c.enabled, c.status, (SELECT model_id FROM camera_models cm WHERE cm.camera_id = c.id) AS active_model_id, c.last_connected_at, c.last_snapshot_at, c.last_error, c.created_at, c.updated_at FROM cameras c ORDER BY c.name",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -49,7 +49,7 @@ impl Database {
 
     pub async fn get_camera(&self, id: Uuid) -> anyhow::Result<Option<Camera>> {
         let row = sqlx::query(
-            "SELECT id, name, rtsp_url, enabled, status, last_connected_at, last_snapshot_at, last_error, created_at, updated_at FROM cameras WHERE id = $1",
+            "SELECT c.id, c.name, c.rtsp_url, c.enabled, c.status, (SELECT model_id FROM camera_models cm WHERE cm.camera_id = c.id) AS active_model_id, c.last_connected_at, c.last_snapshot_at, c.last_error, c.created_at, c.updated_at FROM cameras c WHERE c.id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -95,9 +95,53 @@ impl Database {
     }
 
     pub async fn list_models(&self) -> anyhow::Result<Vec<Model>> {
-        let rows = sqlx::query("SELECT id, name, version, path, active, created_at FROM models ORDER BY name")
+        let rows = sqlx::query("SELECT id, name, version, model_type, path, input_width, input_height, class_list, enabled, default_model, created_at FROM models ORDER BY name")
             .fetch_all(&self.pool).await?;
         rows.into_iter().map(model_from_row).collect()
+    }
+
+    pub async fn get_model(&self, id: Uuid) -> anyhow::Result<Option<Model>> {
+        let row = sqlx::query("SELECT id, name, version, model_type, path, input_width, input_height, class_list, enabled, default_model, created_at FROM models WHERE id=$1").bind(id).fetch_optional(&self.pool).await?;
+        row.map(model_from_row).transpose()
+    }
+
+    pub async fn create_model(&self, input: CreateModel) -> anyhow::Result<Model> {
+        let id = Uuid::new_v4();
+        if input.default_model { sqlx::query("UPDATE models SET default_model=FALSE").execute(&self.pool).await?; }
+        sqlx::query("INSERT INTO models (id,name,version,model_type,path,input_width,input_height,class_list,enabled,default_model) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
+            .bind(id).bind(input.name).bind(input.version).bind(input.model_type).bind(input.path).bind(input.input_width).bind(input.input_height).bind(serde_json::to_value(input.class_list)?).bind(input.enabled).bind(input.default_model).execute(&self.pool).await?;
+        self.get_model(id).await?.context("model was not returned after insert")
+    }
+
+    pub async fn delete_model(&self, id: Uuid) -> anyhow::Result<bool> { let result = sqlx::query("DELETE FROM models WHERE id=$1").bind(id).execute(&self.pool).await?; Ok(result.rows_affected() == 1) }
+
+    pub async fn activate_model(&self, id: Uuid) -> anyhow::Result<bool> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("UPDATE models SET default_model=FALSE").execute(&mut *transaction).await?;
+        let result = sqlx::query("UPDATE models SET default_model=TRUE WHERE id=$1 AND enabled=TRUE").bind(id).execute(&mut *transaction).await?;
+        transaction.commit().await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn assign_camera_model(&self, camera_id: Uuid, model_id: Uuid) -> anyhow::Result<bool> {
+        let result = sqlx::query("INSERT INTO camera_models (camera_id,model_id) VALUES ($1,$2) ON CONFLICT (camera_id) DO UPDATE SET model_id=EXCLUDED.model_id, assigned_at=NOW()")
+            .bind(camera_id).bind(model_id).execute(&self.pool).await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn active_model_for_camera(&self, camera_id: Uuid) -> anyhow::Result<Option<Uuid>> {
+        let row = sqlx::query("SELECT COALESCE((SELECT model_id FROM camera_models WHERE camera_id=$1),(SELECT id FROM models WHERE default_model=TRUE AND enabled=TRUE LIMIT 1)) AS model_id").bind(camera_id).fetch_one(&self.pool).await?;
+        row.try_get("model_id").map_err(Into::into)
+    }
+
+    pub async fn list_benchmarks(&self, model_id: Option<Uuid>) -> anyhow::Result<Vec<BenchmarkResult>> {
+        let rows = match model_id { Some(id) => sqlx::query("SELECT id,model_id,fps,average_inference_time_ms,gpu_memory_usage_mb,cpu_usage_percent,test_timestamp FROM benchmark_results WHERE model_id=$1 ORDER BY test_timestamp DESC").bind(id).fetch_all(&self.pool).await?, None => sqlx::query("SELECT id,model_id,fps,average_inference_time_ms,gpu_memory_usage_mb,cpu_usage_percent,test_timestamp FROM benchmark_results ORDER BY test_timestamp DESC").fetch_all(&self.pool).await? };
+        rows.into_iter().map(benchmark_from_row).collect()
+    }
+
+    pub async fn insert_benchmark(&self, benchmark: &BenchmarkResult) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO benchmark_results (id,model_id,fps,average_inference_time_ms,gpu_memory_usage_mb,cpu_usage_percent,test_timestamp) VALUES ($1,$2,$3,$4,$5,$6,$7)").bind(benchmark.id).bind(benchmark.model_id).bind(benchmark.fps).bind(benchmark.average_inference_time_ms).bind(benchmark.gpu_memory_usage_mb.map(|value| value as i64)).bind(benchmark.cpu_usage_percent).bind(benchmark.test_timestamp).execute(&self.pool).await?;
+        Ok(())
     }
 
     pub async fn list_detections(&self, limit: i64) -> anyhow::Result<Vec<Detection>> {
@@ -291,6 +335,7 @@ fn camera_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Camera> {
         rtsp_url: row.try_get("rtsp_url")?,
         enabled: row.try_get("enabled")?,
         status,
+        active_model_id: row.try_get("active_model_id")?,
         created_at: row.try_get("created_at")?,
         last_connected_at: row.try_get("last_connected_at")?,
         last_snapshot_at: row.try_get("last_snapshot_at")?,
@@ -300,8 +345,10 @@ fn camera_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Camera> {
 }
 
 fn model_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Model> {
-    Ok(Model { id: row.try_get("id")?, name: row.try_get("name")?, version: row.try_get("version")?, path: row.try_get("path")?, active: row.try_get("active")?, created_at: row.try_get("created_at")? })
+    Ok(Model { id: row.try_get("id")?, name: row.try_get("name")?, version: row.try_get("version")?, model_type: row.try_get("model_type")?, path: row.try_get("path")?, input_width: row.try_get("input_width")?, input_height: row.try_get("input_height")?, class_list: serde_json::from_value(row.try_get("class_list")?)?, enabled: row.try_get("enabled")?, default_model: row.try_get("default_model")?, created_at: row.try_get("created_at")? })
 }
+
+fn benchmark_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<BenchmarkResult> { Ok(BenchmarkResult { id: row.try_get("id")?, model_id: row.try_get("model_id")?, fps: row.try_get("fps")?, average_inference_time_ms: row.try_get("average_inference_time_ms")?, gpu_memory_usage_mb: row.try_get::<Option<i64>, _>("gpu_memory_usage_mb")?.map(|value| value as u64), cpu_usage_percent: row.try_get("cpu_usage_percent")?, test_timestamp: row.try_get("test_timestamp")? }) }
 
 fn detection_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Detection> {
     Ok(Detection { id: row.try_get("id")?, camera_id: row.try_get("camera_id")?, track_id: row.try_get("track_id")?, model_id: row.try_get("model_id")?, object_class: row.try_get("object_class")?, confidence: row.try_get("confidence")?, bounding_box: objexel_common::BoundingBox { x: row.try_get("bbox_x")?, y: row.try_get("bbox_y")?, width: row.try_get("bbox_width")?, height: row.try_get("bbox_height")? }, observed_at: row.try_get("observed_at")? })

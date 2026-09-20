@@ -13,6 +13,7 @@ objexel-common = { path = "../common" }
 objexel-database = { path = "../database" }
 objexel-detector = { path = "../detector" }
 objexel-pipeline = { path = "../pipeline" }
+objexel-models = { path = "../models" }
 objexel-rules = { path = "../rules" }
 objexel-zones = { path = "../zones" }
 serde.workspace = true

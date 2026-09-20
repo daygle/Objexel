@@ -26,6 +26,7 @@ pub struct Camera {
     pub rtsp_url: String,
     pub enabled: bool,
     pub status: CameraStatus,
+    pub active_model_id: Option<Uuid>,
     pub last_connected_at: Option<DateTime<Utc>>,
     pub last_snapshot_at: Option<DateTime<Utc>>,
     pub last_error: Option<String>,
@@ -72,9 +73,45 @@ pub struct Model {
     pub id: Uuid,
     pub name: String,
     pub version: String,
+    pub model_type: String,
     pub path: String,
-    pub active: bool,
+    pub input_width: u32,
+    pub input_height: u32,
+    pub class_list: Vec<String>,
+    pub enabled: bool,
+    pub default_model: bool,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CreateModel {
+    pub name: String,
+    pub version: String,
+    pub model_type: String,
+    pub path: String,
+    #[serde(default = "default_input_size")]
+    pub input_width: u32,
+    #[serde(default = "default_input_size")]
+    pub input_height: u32,
+    #[serde(default)]
+    pub class_list: Vec<String>,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub default_model: bool,
+}
+
+fn default_input_size() -> u32 { 640 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct BenchmarkResult {
+    pub id: Uuid,
+    pub model_id: Uuid,
+    pub fps: f32,
+    pub average_inference_time_ms: f32,
+    pub gpu_memory_usage_mb: Option<u64>,
+    pub cpu_usage_percent: Option<f32>,
+    pub test_timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]

@@ -2,7 +2,9 @@
 
 Self-hosted, Linux-first AI camera analytics for home servers and Proxmox. Objexel is being built incrementally as a Rust backend with a SvelteKit frontend, ONNX Runtime inference, RTSP/FFmpeg media handling, and PostgreSQL persistence.
 
-## Phase 6
+## Phase 7
+
+Objexel now supports model-agnostic inference profiles with ONNX model registration, discovery under `/models/yolov8`, `/models/yolov11`, and `/models/yolov26`, per-camera model assignments, hot reload, activation, and benchmark results. See [`docs/model-management.md`](docs/model-management.md).
 
 The backend now includes a single-process intelligence pipeline: ONNX Runtime detection with CUDA/CPU fallback, persistent IoU-based tracking, zone awareness, observation generation, rules, event generation, PostgreSQL storage, generated OpenAPI documentation, and SvelteKit views for observations, tracks, detections, zones, rules, and events. Events are the final output of this phase.
 
@@ -39,7 +41,14 @@ The API listens on `0.0.0.0:8080` by default. `GET /health` does not require a d
 - `GET /api/cameras/:id/status`
 - `GET /api/openapi.json` (generated with `utoipa`)
 - `GET /api/models`
+- `GET /api/models/:id`
+- `POST /api/models`
+- `DELETE /api/models/:id`
 - `POST /api/models/reload`
+- `POST /api/models/:id/activate`
+- `POST /api/models/:id/benchmark`
+- `GET /api/benchmarks`
+- `POST /api/cameras/:id/model/:model_id`
 - `GET /api/detections` and `GET /api/detections/:id`
 - `GET /api/tracks` and `GET /api/tracks/:id`
 - `GET /api/observations` and `GET /api/observations/:id`
