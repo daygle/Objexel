@@ -8,10 +8,11 @@ on:
 permissions:
   contents: read
 
-# Cancel superseded runs for the same PR ref so old commits stop competing for
-# runners and the build cache; let main pushes always run to completion.
+# Group PR runs by ref so a newer commit cancels the superseded run; give each
+# push (main) run a unique group so main runs are never cancelled or queued and
+# always finish to a clean status.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
