@@ -13,8 +13,22 @@ export function clearCsrf(): void {
   try { sessionStorage.removeItem(CSRF_KEY); } catch { /* storage unavailable */ }
 }
 
+function cookieValue(name: string): string | null {
+  if (!browser) return null;
+  const prefix = `${name}=`;
+  for (const part of document.cookie.split(';')) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(prefix)) return decodeURIComponent(trimmed.slice(prefix.length));
+  }
+  return null;
+}
+
 function csrfToken(): string | null {
   if (!browser) return null;
+  // The server issues a readable objexel_csrf cookie that shares the session's lifetime,
+  // so it survives across tabs and reloads. Fall back to sessionStorage from the login turn.
+  const fromCookie = cookieValue(CSRF_KEY);
+  if (fromCookie) return fromCookie;
   try { return sessionStorage.getItem(CSRF_KEY); } catch { return null; }
 }
 

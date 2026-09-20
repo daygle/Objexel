@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::{Path, Query, State, WebSocketUpgrade, Request},
-    http::{header, HeaderMap, HeaderValue, StatusCode},
+    http::{header, HeaderMap, HeaderValue, Method, StatusCode},
     middleware::{self, Next},
     response::Response,
     routing::{get, post},
@@ -193,10 +193,30 @@ async fn metrics(State(state): State<Arc<AppState>>) -> Json<Value> {
 }
 
 const SESSION_COOKIE: &str = "objexel_session";
+// Readable (non-HttpOnly) companion cookie holding the CSRF token, so the SPA can
+// echo it back in the x-csrf-token header for the double-submit check. It shares the
+// session cookie's lifetime, which lets a valid session recover the token in a fresh
+// tab (sessionStorage does not survive across tabs).
+const CSRF_COOKIE: &str = "objexel_csrf";
 const SESSION_DAYS: i64 = 7;
 
 fn public_path(path: &str) -> bool {
     matches!(path, "/health" | "/ready" | "/readiness" | "/liveness" | "/api/auth/login" | "/api/auth/setup" | "/api/openapi.json" | "/api/v1/openapi.json")
+}
+
+fn is_write_method(method: &Method) -> bool {
+    *method == Method::POST || *method == Method::PUT || *method == Method::PATCH || *method == Method::DELETE
+}
+
+/// Mutating requests that any authenticated user may make regardless of role
+/// (still CSRF-protected): signing out, and downloading a clip (a read served over POST).
+fn write_role_exempt(path: &str) -> bool {
+    path == "/api/auth/logout" || (path.starts_with("/api/clips/") && path.ends_with("/download"))
+}
+
+fn cookie_secure_suffix() -> &'static str {
+    let secure = std::env::var("OBJEXEL_COOKIE_SECURE").map(|value| value != "0").unwrap_or(false);
+    if secure { "; Secure" } else { "" }
 }
 
 fn auth_failure(status: StatusCode, message: &str) -> Response {
@@ -219,6 +239,15 @@ async fn require_session(State(state): State<Arc<AppState>>, request: Request, n
     };
     match database.session_user(&digest_token(&token)).await {
         Ok(Some(session)) => {
+            if is_write_method(request.method()) {
+                let supplied = request.headers().get("x-csrf-token").and_then(|value| value.to_str().ok());
+                if !supplied.is_some_and(|token| digest_token(token) == session.csrf_token_hash) {
+                    return auth_failure(StatusCode::FORBIDDEN, "invalid or missing CSRF token");
+                }
+                if !session.user.role.can_write() && !write_role_exempt(request.uri().path()) {
+                    return auth_failure(StatusCode::FORBIDDEN, "write access requires the operator or administrator role");
+                }
+            }
             let _ = database.update_session_seen(session.session_id).await;
             next.run(request).await
         }
@@ -250,10 +279,19 @@ fn require_csrf(session: &SessionUser, headers: &HeaderMap) -> Result<(), ErrorR
 
 fn session_response(auth: AuthResponse, token: &str) -> Result<(HeaderMap, Json<AuthResponse>), ErrorResponse> {
     let mut headers = HeaderMap::new();
-    let secure = std::env::var("OBJEXEL_COOKIE_SECURE").map(|value| value != "0").unwrap_or(false);
-    let secure_flag = if secure { "; Secure" } else { "" };
-    headers.insert(header::SET_COOKIE, HeaderValue::from_str(&format!("{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={}{}", SESSION_DAYS * 86_400, secure_flag)).map_err(|_| internal_error(anyhow::anyhow!("invalid session cookie")))?);
+    let secure_flag = cookie_secure_suffix();
+    let max_age = SESSION_DAYS * 86_400;
+    headers.insert(header::SET_COOKIE, HeaderValue::from_str(&format!("{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}{secure_flag}")).map_err(|_| internal_error(anyhow::anyhow!("invalid session cookie")))?);
+    headers.append(header::SET_COOKIE, HeaderValue::from_str(&format!("{CSRF_COOKIE}={}; Path=/; SameSite=Strict; Max-Age={max_age}{secure_flag}", auth.csrf_token)).map_err(|_| internal_error(anyhow::anyhow!("invalid csrf cookie")))?);
     Ok((headers, Json(auth)))
+}
+
+fn cleared_auth_cookies() -> Result<HeaderMap, ErrorResponse> {
+    let mut headers = HeaderMap::new();
+    let secure_flag = cookie_secure_suffix();
+    headers.insert(header::SET_COOKIE, HeaderValue::from_str(&format!("{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0{secure_flag}")).map_err(|_| internal_error(anyhow::anyhow!("invalid session cookie")))?);
+    headers.append(header::SET_COOKIE, HeaderValue::from_str(&format!("{CSRF_COOKIE}=; Path=/; SameSite=Strict; Max-Age=0{secure_flag}")).map_err(|_| internal_error(anyhow::anyhow!("invalid csrf cookie")))?);
+    Ok(headers)
 }
 
 async fn login(State(state): State<Arc<AppState>>, Json(input): Json<LoginRequest>) -> Result<(HeaderMap, Json<AuthResponse>), ErrorResponse> {
@@ -278,7 +316,7 @@ async fn setup_admin(State(state): State<Arc<AppState>>, Json(input): Json<Creat
     session_response(AuthResponse { user, csrf_token: csrf }, &token)
 }
 
-async fn logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<StatusCode, ErrorResponse> {
+async fn logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<(HeaderMap, StatusCode), ErrorResponse> {
     if let Some(token) = cookie_value(&headers, SESSION_COOKIE) {
         if let Some(database) = &state.database {
             let token_hash = digest_token(&token);
@@ -289,7 +327,7 @@ async fn logout(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Resul
             }
         }
     }
-    Ok(StatusCode::NO_CONTENT)
+    Ok((cleared_auth_cookies()?, StatusCode::NO_CONTENT))
 }
 
 async fn me(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Result<Json<User>, ErrorResponse> { Ok(Json(authenticated(&state, &headers).await?.user)) }
@@ -843,5 +881,25 @@ mod tests {
         let document = ApiDoc::openapi();
         assert!(document.paths.paths.contains_key("/api/cameras/{id}/snapshot"));
         assert!(document.paths.paths.contains_key("/api/cameras/{id}/test"));
+    }
+
+    #[test]
+    fn only_mutating_methods_require_write_guards() {
+        assert!(is_write_method(&Method::POST));
+        assert!(is_write_method(&Method::PUT));
+        assert!(is_write_method(&Method::PATCH));
+        assert!(is_write_method(&Method::DELETE));
+        assert!(!is_write_method(&Method::GET));
+        assert!(!is_write_method(&Method::HEAD));
+    }
+
+    #[test]
+    fn write_role_exemptions_cover_logout_and_clip_downloads() {
+        assert!(write_role_exempt("/api/auth/logout"));
+        assert!(write_role_exempt("/api/clips/2f1c6b0e-0000-0000-0000-000000000000/download"));
+        // Creating or deleting resources is never exempt from the write-role check.
+        assert!(!write_role_exempt("/api/cameras"));
+        assert!(!write_role_exempt("/api/clips/2f1c6b0e-0000-0000-0000-000000000000"));
+        assert!(!write_role_exempt("/api/models/2f1c6b0e-0000-0000-0000-000000000000/activate"));
     }
 }
