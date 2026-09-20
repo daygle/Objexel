@@ -530,7 +530,9 @@ async fn get_model(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> 
 
 #[utoipa::path(post, path = "/api/models", tag = "models", request_body = CreateModel, responses((status = 201, body = Model), (status = 400), (status = 503)))]
 async fn create_model(State(state): State<Arc<AppState>>, Json(input): Json<CreateModel>) -> Result<(StatusCode, Json<Model>), ErrorResponse> {
-    ModelRegistry::validate(input.path.as_ref(), input.input_width, input.input_height).await.map_err(|error| bad_request(&error.to_string()))?;
+    let model_root = std::env::var("OBJEXEL_MODEL_DIR").unwrap_or_else(|_| "/models".into());
+    ModelRegistry::validated_path(std::path::Path::new(&model_root), input.path.as_ref(), input.input_width, input.input_height)
+        .map_err(|error| bad_request(&error.to_string()))?;
     let database = database(&state)?;
     let model = database.create_model(input).await.map_err(internal_error)?;
     database.audit(None, "model.created", "model", Some(model.id), json!({})).await.map_err(internal_error)?;
@@ -556,7 +558,8 @@ async fn activate_model(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>
 async fn benchmark_model(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<BenchmarkResult>, ErrorResponse> {
     let model = database(&state)?.get_model(id).await.map_err(internal_error)?.ok_or_else(|| not_found("model not found"))?;
     let pipeline = state.pipeline.as_ref().ok_or_else(|| service_unavailable("inference pipeline is not configured"))?;
-    let registry = ModelRegistry::new("/models", pipeline.models.clone());
+    let model_root = std::env::var("OBJEXEL_MODEL_DIR").unwrap_or_else(|_| "/models".into());
+    let registry = ModelRegistry::new(model_root, pipeline.models.clone());
     let result = registry.benchmark(&model, 10).await.map_err(|error| bad_request(&error.to_string()))?;
     database(&state)?.insert_benchmark(&result).await.map_err(internal_error)?;
     Ok(Json(result))
@@ -746,7 +749,8 @@ struct MediaQuery { camera_id: Option<Uuid>, limit: Option<i64> }
 async fn reload_models(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ErrorResponse> {
     let pipeline = state.pipeline.as_ref().ok_or_else(|| service_unavailable("inference pipeline is not configured"))?;
     let models = database(&state)?.list_models().await.map_err(internal_error)?;
-    let registry = ModelRegistry::new("/models", pipeline.models.clone());
+    let model_root = std::env::var("OBJEXEL_MODEL_DIR").unwrap_or_else(|_| "/models".into());
+    let registry = ModelRegistry::new(model_root, pipeline.models.clone());
     let loaded = registry.load_registered(&models).await.map_err(|error| bad_request(&error.to_string()))?;
     if let Some(default_model) = models.iter().find(|model| model.default_model && model.enabled) {
         pipeline.models.set_active(default_model.id).await.map_err(|error| bad_request(&error.to_string()))?;

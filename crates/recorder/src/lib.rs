@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
 use objexel_common::{Clip, Recording, Snapshot};
-use std::{path::{Path, PathBuf}, process::Stdio, sync::Arc};
+use std::{path::PathBuf, process::Stdio, sync::Arc};
 use tokio::{fs, process::{Child, Command}, time::{timeout, Duration as TokioDuration}};
 use uuid::Uuid;
 
@@ -83,12 +83,23 @@ impl Recorder {
         let mut removed = 0;
         for (folder, days) in [("recordings", self.config.retention.continuous_days), ("clips", self.config.retention.event_days), ("snapshots", self.config.retention.snapshot_days)] {
             let root = self.config.storage_root.join(folder);
-            if !Path::new(&root).exists() { continue; }
-            let mut entries = fs::read_dir(root).await?;
-            while let Some(entry) = entries.next_entry().await? {
-                let metadata = entry.metadata().await?;
-                if metadata.is_file() {
-                    if let Ok(modified) = metadata.modified() { if now.signed_duration_since(DateTime::<Utc>::from(modified)).num_days() > days { fs::remove_file(entry.path()).await?; removed += 1; } }
+            if !root.is_dir() { continue; }
+            let mut pending = vec![root];
+            while let Some(directory) = pending.pop() {
+                let mut entries = fs::read_dir(&directory).await?;
+                while let Some(entry) = entries.next_entry().await? {
+                    let path = entry.path();
+                    let metadata = entry.metadata().await?;
+                    if metadata.is_dir() {
+                        pending.push(path);
+                    } else if metadata.is_file() {
+                        if let Ok(modified) = metadata.modified() {
+                            if now.signed_duration_since(DateTime::<Utc>::from(modified)).num_days() > days {
+                                fs::remove_file(path).await?;
+                                removed += 1;
+                            }
+                        }
+                    }
                 }
             }
         }
