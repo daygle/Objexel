@@ -1,14 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { api } from '$lib/api';
   type Clip = { id:string; event_id?:string; clip_start:string; clip_end:string; clip_path:string };
   type Snapshot = { id:string; event_id?:string; camera_id:string; timestamp:string };
   type Recording = { id:string; camera_id:string; start_time:string; end_time?:string; file_path:string; mode:string };
   let clips: Clip[] = []; let snapshots: Snapshot[] = []; let recordings: Recording[] = []; let selected: Clip | null = null;
   onMount(async () => {
-    const [clipResponse, snapshotResponse, recordingResponse] = await Promise.all([fetch('/api/clips?limit=100'), fetch('/api/snapshots?limit=100'), fetch('/api/recordings?limit=100')]);
+    const [clipResponse, snapshotResponse, recordingResponse] = await Promise.all([api('/api/clips?limit=100'), api('/api/snapshots?limit=100'), api('/api/recordings?limit=100')]);
     if (clipResponse.ok) clips = await clipResponse.json(); if (snapshotResponse.ok) snapshots = await snapshotResponse.json(); if (recordingResponse.ok) recordings = await recordingResponse.json();
   });
-  async function download(clip: Clip) { const response = await fetch(`/api/clips/${clip.id}/download`, { method:'POST' }); if (!response.ok) return; const blob = await response.blob(); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${clip.id}.mp4`; anchor.click(); URL.revokeObjectURL(url); }
+  async function download(clip: Clip) { const response = await api(`/api/clips/${clip.id}/download`, { method:'POST' }); if (!response.ok) return; const blob = await response.blob(); const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${clip.id}.mp4`; anchor.click(); URL.revokeObjectURL(url); }
 </script>
 <svelte:head><title>Recordings · Objexel</title></svelte:head>
 <div class="row"><div><p class="eyebrow">Video memory</p><h1>Recordings</h1><p class="muted">Continuous segments, event clips, and snapshots in one searchable timeline.</p></div><span class="pill">{clips.length} event clips</span></div>

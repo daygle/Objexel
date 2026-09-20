@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { api } from '$lib/api';
   type Observation = { id:string; observation_type:string; summary:string; track_id:string; created_at:string };
   let observations: Observation[] = [];
   let loading = true;
-  onMount(async () => { try { const response = await fetch('/api/observations?limit=50'); if (response.ok) observations = await response.json(); } finally { loading = false; } });
+  onMount(async () => { try { const response = await api('/api/observations?limit=50'); if (response.ok) observations = await response.json(); } finally { loading = false; } });
 </script>
 <svelte:head><title>Observations · Objexel</title></svelte:head>
 <p class="eyebrow">Behavioral intelligence</p><h1>Observations</h1><p class="muted">Raw detections become useful answers here.</p>

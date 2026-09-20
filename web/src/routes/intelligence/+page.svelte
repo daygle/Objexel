@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { api } from '$lib/api';
   type Identity = { id:string; object_class:string; display_name?:string; familiarity:string; familiarity_score:number; sightings:number };
   type Anomaly = { id:string; identity_id?:string; behaviour_id?:string; anomaly_score:number; priority_score:number; priority:string; created_at:string };
   let identities: Identity[] = []; let anomalies: Anomaly[] = []; let loading = true;
-  onMount(async () => { const response = await fetch('/api/intelligence'); if (response.ok) { const data = await response.json(); identities = data.identities; anomalies = data.anomalies; } loading = false; });
+  onMount(async () => { const response = await api('/api/intelligence'); if (response.ok) { const data = await response.json(); identities = data.identities; anomalies = data.anomalies; } loading = false; });
 </script>
 <svelte:head><title>Intelligence · Objexel</title></svelte:head>
 <div class="row"><div><p class="eyebrow">Adaptive intelligence</p><h1>Is this normal?</h1><p class="muted">Objexel learns recurring activity and ranks what deserves your attention.</p></div><span class="pill">{anomalies.length} scored signals</span></div>

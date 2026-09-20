@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { api } from '$lib/api';
   type Result = { entity_type:string; id:string; camera_id:string; object_class?:string; summary:string; occurred_at:string; confidence?:number; clip_id?:string; snapshot_id?:string };
   let q = ''; let objectClass = ''; let entity = 'all'; let results: Result[] = []; let loading = false; let searched = false;
-  async function search() { loading = true; searched = true; const params = new URLSearchParams(); if (q) params.set('q', q); if (objectClass) params.set('object_class', objectClass); params.set('limit', '100'); const path = entity === 'all' ? '/api/search' : `/api/search/${entity}`; const response = await fetch(`${path}?${params}`); if (response.ok) results = await response.json(); loading = false; }
+  async function search() { loading = true; searched = true; const params = new URLSearchParams(); if (q) params.set('q', q); if (objectClass) params.set('object_class', objectClass); params.set('limit', '100'); const path = entity === 'all' ? '/api/search' : `/api/search/${entity}`; const response = await api(`${path}?${params}`); if (response.ok) results = await response.json(); loading = false; }
   onMount(search);
 </script>
 <svelte:head><title>Search · Objexel</title></svelte:head>

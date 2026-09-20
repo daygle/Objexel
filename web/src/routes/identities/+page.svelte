@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { api, apiError } from '$lib/api';
   type Identity = { id:string; object_class:string; display_name?:string; familiarity_score:number; familiarity:string; first_seen:string; last_seen:string; sightings:number };
   type History = { id:string; track_id:string; camera_id:string; similarity:number; observed_at:string };
   let identities: Identity[] = []; let selected: Identity | null = null; let history: History[] = []; let name = ''; let message = '';
-  async function load() { const response = await fetch('/api/identities?limit=100'); if (response.ok) identities = await response.json(); }
-  async function choose(identity: Identity) { selected = identity; name = identity.display_name ?? ''; const response = await fetch(`/api/identities/${identity.id}/history?limit=30`); if (response.ok) history = await response.json(); }
-  async function rename() { if (!selected) return; const response = await fetch(`/api/identities/${selected.id}`, { method:'PUT', headers:{'content-type':'application/json'}, body:JSON.stringify({display_name:name.trim() || null}) }); message = response.ok ? 'Identity name saved' : await response.text(); await load(); if (selected) selected = identities.find((item) => item.id === selected?.id) ?? selected; }
+  async function load() { const response = await api('/api/identities?limit=100'); if (response.ok) identities = await response.json(); }
+  async function choose(identity: Identity) { selected = identity; name = identity.display_name ?? ''; const response = await api(`/api/identities/${identity.id}/history?limit=30`); if (response.ok) history = await response.json(); }
+  async function rename() { if (!selected) return; const response = await api(`/api/identities/${selected.id}`, { method:'PUT', json:{display_name:name.trim() || null} }); message = response.ok ? 'Identity name saved' : await apiError(response); await load(); if (selected) selected = identities.find((item) => item.id === selected?.id) ?? selected; }
   onMount(load);
 </script>
 <svelte:head><title>Identities · Objexel</title></svelte:head>

@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { api } from '$lib/api';
   type Behaviour = { id:string; track_id:string; camera_id:string; object_class:string; behaviour_type:string; confidence:number; summary:string; start_time:string; end_time:string; recording_id?:string; clip_id?:string };
   let behaviours: Behaviour[] = [];
   let filter = '';
-  onMount(async () => { const response = await fetch('/api/behaviours?limit=100'); if (response.ok) behaviours = await response.json(); });
+  onMount(async () => { const response = await api('/api/behaviours?limit=100'); if (response.ok) behaviours = await response.json(); });
   $: filtered = behaviours.filter((item) => !filter || item.behaviour_type.includes(filter) || item.object_class.toLowerCase().includes(filter.toLowerCase()));
 </script>
 <svelte:head><title>Behaviours · Objexel</title></svelte:head>

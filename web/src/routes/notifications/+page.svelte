@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { api } from '$lib/api';
 
   type Notification = { id:string; title:string; body:string; read:boolean; created_at:string };
   type Execution = { id:string; action_id:string; event_id:string; status:string; execution_time_ms?:number; error_message?:string; created_at:string };
@@ -10,7 +11,7 @@
   let providers: Provider[] = [];
 
   async function load() {
-    const responses = await Promise.all([fetch('/api/notifications?limit=50'), fetch('/api/action-executions?limit=50'), fetch('/api/notification-providers')]);
+    const responses = await Promise.all([api('/api/notifications?limit=50'), api('/api/action-executions?limit=50'), api('/api/notification-providers')]);
     if (responses[0].ok) notifications = await responses[0].json();
     if (responses[1].ok) executions = await responses[1].json();
     if (responses[2].ok) providers = await responses[2].json();
