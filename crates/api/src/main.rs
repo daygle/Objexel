@@ -1,4 +1,4 @@
-use objexel_api::{router, AppState};
+use objexel_api::{router, AppState, RuntimeMetrics};
 use objexel_camera::CameraService;
 use objexel_pipeline::ObservationPipeline;
 use objexel_playback::PlaybackService;
@@ -13,8 +13,19 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter(env::var("RUST_LOG").unwrap_or_else(|_| "info".into())).init();
     let database = match env::var("DATABASE_URL") {
         Ok(url) => {
-            let database = Database::connect(&url).await?;
-            database.migrate().await?;
+            let database = loop {
+                match Database::connect(&url).await {
+                    Ok(database) => break database,
+                    Err(error) => {
+                        tracing::warn!(%error, "database connection failed; retrying");
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    }
+                }
+            };
+            if let Err(error) = database.migrate().await {
+                tracing::error!(%error, "database migration failed");
+                return Err(error);
+            }
             Some(database)
         }
         Err(_) => {
@@ -103,10 +114,15 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-    let app = router(AppState { database, camera_service, pipeline, recorder, playback });
+    let app = router(AppState { database, camera_service, pipeline, recorder, playback, metrics: RuntimeMetrics::default() });
     let address = env::var("OBJEXEL_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into());
     let listener = TcpListener::bind(&address).await?;
     tracing::info!(%address, "Objexel API listening");
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+            tracing::info!("shutdown signal received; stopping Objexel gracefully");
+        })
+        .await?;
     Ok(())
 }

@@ -20,7 +20,7 @@ use objexel_search::{SearchFilters, SearchResult};
 use objexel_zones::validate_polygon;
 use objexel_database::Database;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::{sync::{atomic::{AtomicU64, Ordering}, Arc}, time::Instant};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use utoipa::OpenApi;
 use uuid::Uuid;
@@ -32,11 +32,28 @@ pub struct AppState {
     pub pipeline: Option<ObservationPipeline>,
     pub recorder: Recorder,
     pub playback: PlaybackService,
+    pub metrics: RuntimeMetrics,
+}
+
+#[derive(Clone)]
+pub struct RuntimeMetrics {
+    started_at: Instant,
+    requests: Arc<AtomicU64>,
+}
+
+impl Default for RuntimeMetrics {
+    fn default() -> Self { Self { started_at: Instant::now(), requests: Arc::new(AtomicU64::new(0)) } }
+}
+
+impl RuntimeMetrics {
+    fn snapshot(&self) -> Value {
+        json!({ "uptime_seconds": self.started_at.elapsed().as_secs(), "http_requests_total": self.requests.load(Ordering::Relaxed) })
+    }
 }
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, list_templates, create_template, test_notification, global_search, search_events, search_observations, search_tracks, search_recordings, search_detections, search_behaviours, list_behaviours, get_behaviour, list_identities, get_identity, update_identity, identity_history, intelligence_summary, list_anomalies, list_fusion, list_model_assignments, create_model_assignment, analytics_summary, analytics_cameras, analytics_zones, analytics_models, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
+    paths(health, ready, liveness, readiness, metrics, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, get_model, create_model, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, list_templates, create_template, test_notification, global_search, search_events, search_observations, search_tracks, search_recordings, search_detections, search_behaviours, list_behaviours, get_behaviour, list_identities, get_identity, update_identity, identity_history, intelligence_summary, list_anomalies, list_fusion, list_model_assignments, create_model_assignment, analytics_summary, analytics_cameras, analytics_zones, analytics_models, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
     components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Recording, Clip, Snapshot, SearchResult, AnalyticsSummary, Behaviour, Identity, IdentityObservation, IdentityStatistics, UpdateIdentity, IdentityScore, BehaviourScore, AnomalyEvent, IntelligenceSummary, ModelAssignment, CreateModelAssignment, FusionResult, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
     tags((name = "cameras", description = "Camera management and RTSP ingestion"))
 )]
@@ -60,6 +77,9 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/ready", get(ready))
+        .route("/readiness", get(readiness))
+        .route("/liveness", get(liveness))
+        .route("/metrics", get(metrics))
         .route("/api/openapi.json", get(openapi))
         .route("/api/v1/openapi.json", get(openapi))
         .route("/api/v1/events", get(events_socket))
@@ -130,6 +150,28 @@ async fn health() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok".into(), service: "objexel-api".into(), version: env!("CARGO_PKG_VERSION").into() })
 }
 
+#[utoipa::path(get, path = "/liveness", responses((status = 200)))]
+async fn liveness() -> Json<Value> { Json(json!({"status": "alive"})) }
+
+#[utoipa::path(get, path = "/readiness", responses((status = 200), (status = 503)))]
+async fn readiness(State(state): State<Arc<AppState>>) -> (StatusCode, Json<Value>) { ready(State(state)).await }
+
+#[utoipa::path(get, path = "/metrics", responses((status = 200)))]
+async fn metrics(State(state): State<Arc<AppState>>) -> Json<Value> {
+    let mut value = state.metrics.snapshot();
+    if let Some(database) = &state.database {
+        let cameras = database.list_cameras().await.unwrap_or_default();
+        let tracks = database.list_tracks(10_000).await.unwrap_or_default();
+        let detections = database.list_detections(10_000).await.unwrap_or_default();
+        value["cameras_total"] = json!(cameras.len());
+        value["cameras_online"] = json!(cameras.iter().filter(|camera| camera.status == CameraStatus::Online).count());
+        value["active_tracks"] = json!(tracks.len());
+        value["recent_detections"] = json!(detections.len());
+        value["database"] = json!("ok");
+    } else { value["database"] = json!("not_configured"); }
+    Json(value)
+}
+
 #[utoipa::path(get, path = "/ready", responses((status = 200), (status = 503)))]
 async fn ready(State(state): State<Arc<AppState>>) -> (StatusCode, Json<Value>) {
     match &state.database {
@@ -154,7 +196,9 @@ async fn list_cameras(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Cam
 async fn create_camera(State(state): State<Arc<AppState>>, Json(input): Json<CreateCamera>) -> Result<(StatusCode, Json<Camera>), ErrorResponse> {
     validate_camera_input(&input.name, &input.rtsp_url)?;
     let database = database(&state)?;
-    database.create_camera(input).await.map(|camera| (StatusCode::CREATED, Json(camera))).map_err(internal_error)
+    let camera = database.create_camera(input).await.map_err(internal_error)?;
+    database.audit(None, "camera.created", "camera", Some(camera.id), json!({})).await.map_err(internal_error)?;
+    Ok((StatusCode::CREATED, Json(camera)))
 }
 
 #[utoipa::path(get, path = "/api/cameras/{id}", tag = "cameras", params(("id" = Uuid, Path, description = "Camera identifier")), responses((status = 200, body = Camera), (status = 404), (status = 503)))]
@@ -169,15 +213,23 @@ async fn get_camera(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) ->
 async fn update_camera(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>, Json(input): Json<UpdateCamera>) -> Result<Json<Camera>, ErrorResponse> {
     if let Some(name) = &input.name { if name.trim().is_empty() { return Err(bad_request("name cannot be empty")); } }
     if let Some(rtsp_url) = &input.rtsp_url { if rtsp_url.trim().is_empty() { return Err(bad_request("rtsp_url cannot be empty")); } }
-    match database(&state)?.update_camera(id, input).await.map_err(internal_error)? {
-        Some(camera) => Ok(Json(camera)),
+    let database = database(&state)?;
+    match database.update_camera(id, input).await.map_err(internal_error)? {
+        Some(camera) => {
+            database.audit(None, "camera.updated", "camera", Some(id), json!({})).await.map_err(internal_error)?;
+            Ok(Json(camera))
+        },
         None => Err(not_found("camera not found")),
     }
 }
 
 #[utoipa::path(delete, path = "/api/cameras/{id}", tag = "cameras", params(("id" = Uuid, Path, description = "Camera identifier")), responses((status = 204), (status = 404), (status = 503)))]
 async fn delete_camera(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<StatusCode, ErrorResponse> {
-    if database(&state)?.delete_camera(id).await.map_err(internal_error)? { Ok(StatusCode::NO_CONTENT) } else { Err(not_found("camera not found")) }
+    let database = database(&state)?;
+    if database.delete_camera(id).await.map_err(internal_error)? {
+        database.audit(None, "camera.deleted", "camera", Some(id), json!({})).await.map_err(internal_error)?;
+        Ok(StatusCode::NO_CONTENT)
+    } else { Err(not_found("camera not found")) }
 }
 
 #[utoipa::path(post, path = "/api/cameras/{id}/test", tag = "cameras", params(("id" = Uuid, Path, description = "Camera identifier")), responses((status = 200, body = CameraTestResult), (status = 404), (status = 503)))]
@@ -235,11 +287,20 @@ async fn get_model(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> 
 #[utoipa::path(post, path = "/api/models", tag = "models", request_body = CreateModel, responses((status = 201, body = Model), (status = 400), (status = 503)))]
 async fn create_model(State(state): State<Arc<AppState>>, Json(input): Json<CreateModel>) -> Result<(StatusCode, Json<Model>), ErrorResponse> {
     ModelRegistry::validate(input.path.as_ref(), input.input_width, input.input_height).await.map_err(|error| bad_request(&error.to_string()))?;
-    database(&state)?.create_model(input).await.map(|model| (StatusCode::CREATED, Json(model))).map_err(internal_error)
+    let database = database(&state)?;
+    let model = database.create_model(input).await.map_err(internal_error)?;
+    database.audit(None, "model.created", "model", Some(model.id), json!({})).await.map_err(internal_error)?;
+    Ok((StatusCode::CREATED, Json(model)))
 }
 
 #[utoipa::path(delete, path = "/api/models/{id}", tag = "models", params(("id" = Uuid, Path)), responses((status = 204), (status = 404), (status = 503)))]
-async fn delete_model(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<StatusCode, ErrorResponse> { if database(&state)?.delete_model(id).await.map_err(internal_error)? { Ok(StatusCode::NO_CONTENT) } else { Err(not_found("model not found")) } }
+async fn delete_model(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<StatusCode, ErrorResponse> {
+    let database = database(&state)?;
+    if database.delete_model(id).await.map_err(internal_error)? {
+        database.audit(None, "model.deleted", "model", Some(id), json!({})).await.map_err(internal_error)?;
+        Ok(StatusCode::NO_CONTENT)
+    } else { Err(not_found("model not found")) }
+}
 
 #[utoipa::path(post, path = "/api/models/{id}/activate", tag = "models", params(("id" = Uuid, Path)), responses((status = 200), (status = 404), (status = 503)))]
 async fn activate_model(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Value>, ErrorResponse> { if database(&state)?.activate_model(id).await.map_err(internal_error)? { if let Some(pipeline) = &state.pipeline { let _ = pipeline.models.set_active(id).await; } Ok(Json(json!({"active": id}))) } else { Err(not_found("model not found or disabled")) } }
@@ -518,18 +579,34 @@ async fn get_rule(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> R
 #[utoipa::path(post, path = "/api/rules", tag = "rules", request_body = CreateRule, responses((status = 201, body = Rule), (status = 400), (status = 503)))]
 async fn create_rule(State(state): State<Arc<AppState>>, Json(input): Json<CreateRule>) -> Result<(StatusCode, Json<Rule>), ErrorResponse> {
     validate_rule(&input.name, input.cooldown_seconds, input.suppression_seconds)?;
-    database(&state)?.create_rule(input).await.map(|rule| (StatusCode::CREATED, Json(rule))).map_err(internal_error)
+    let database = database(&state)?;
+    let rule = database.create_rule(input).await.map_err(internal_error)?;
+    database.audit(None, "rule.created", "rule", Some(rule.id), json!({})).await.map_err(internal_error)?;
+    Ok((StatusCode::CREATED, Json(rule)))
 }
 
 #[utoipa::path(put, path = "/api/rules/{id}", tag = "rules", params(("id" = Uuid, Path)), request_body = UpdateRule, responses((status = 200, body = Rule), (status = 400), (status = 404), (status = 503)))]
 async fn update_rule(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>, Json(input): Json<UpdateRule>) -> Result<Json<Rule>, ErrorResponse> {
     if let Some(name) = &input.name { if name.trim().is_empty() { return Err(bad_request("rule name cannot be empty")); } }
     if input.cooldown_seconds.is_some_and(|value| value < 0) || input.suppression_seconds.is_some_and(|value| value < 0) { return Err(bad_request("cooldown and suppression cannot be negative")); }
-    match database(&state)?.update_rule(id, input).await.map_err(internal_error)? { Some(rule) => Ok(Json(rule)), None => Err(not_found("rule not found")) }
+    let database = database(&state)?;
+    match database.update_rule(id, input).await.map_err(internal_error)? {
+        Some(rule) => {
+            database.audit(None, "rule.updated", "rule", Some(id), json!({})).await.map_err(internal_error)?;
+            Ok(Json(rule))
+        }
+        None => Err(not_found("rule not found")),
+    }
 }
 
 #[utoipa::path(delete, path = "/api/rules/{id}", tag = "rules", params(("id" = Uuid, Path)), responses((status = 204), (status = 404), (status = 503)))]
-async fn delete_rule(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<StatusCode, ErrorResponse> { if database(&state)?.delete_rule(id).await.map_err(internal_error)? { Ok(StatusCode::NO_CONTENT) } else { Err(not_found("rule not found")) } }
+async fn delete_rule(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<StatusCode, ErrorResponse> {
+    let database = database(&state)?;
+    if database.delete_rule(id).await.map_err(internal_error)? {
+        database.audit(None, "rule.deleted", "rule", Some(id), json!({})).await.map_err(internal_error)?;
+        Ok(StatusCode::NO_CONTENT)
+    } else { Err(not_found("rule not found")) }
+}
 
 #[utoipa::path(get, path = "/api/events", tag = "events", responses((status = 200, body = [Event]), (status = 503)))]
 async fn list_events(State(state): State<Arc<AppState>>, Query(query): Query<LimitQuery>) -> Result<Json<Vec<Event>>, ErrorResponse> { database(&state)?.list_events(query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error) }

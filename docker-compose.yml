@@ -14,6 +14,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
   api:
     build:
@@ -24,6 +26,14 @@ services:
       RUST_LOG: info
     ports:
       - "8080:8080"
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://localhost:8080/liveness"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     depends_on:
       postgres:
         condition: service_healthy

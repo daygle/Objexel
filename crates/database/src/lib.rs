@@ -20,7 +20,9 @@ pub struct Database {
 impl Database {
     pub async fn connect(database_url: &str) -> anyhow::Result<Self> {
         let pool = PgPoolOptions::new()
+            .min_connections(1)
             .max_connections(10)
+            .acquire_timeout(std::time::Duration::from_secs(10))
             .connect(database_url)
             .await
             .context("connect to PostgreSQL")?;
@@ -31,6 +33,20 @@ impl Database {
 
     pub async fn migrate(&self) -> anyhow::Result<()> {
         sqlx::migrate!("../../migrations").run(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Append an operational audit record. Callers must pass redacted details and never secrets.
+    pub async fn audit(&self, actor_id: Option<Uuid>, action: &str, resource_type: &str, resource_id: Option<Uuid>, details: Value) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO audit_logs (id, actor_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)")
+            .bind(Uuid::new_v4())
+            .bind(actor_id)
+            .bind(action)
+            .bind(resource_type)
+            .bind(resource_id)
+            .bind(details)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
