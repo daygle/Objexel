@@ -123,6 +123,42 @@ pub struct BoundingBox {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ModelAssignment {
+    pub id: Uuid,
+    pub camera_id: Uuid,
+    pub model_id: Uuid,
+    pub priority: i32,
+    pub confidence_threshold: f32,
+    pub fps_limit: Option<f32>,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CreateModelAssignment {
+    pub camera_id: Uuid,
+    pub model_id: Uuid,
+    #[serde(default)]
+    pub priority: i32,
+    #[serde(default = "default_assignment_threshold")]
+    pub confidence_threshold: f32,
+    pub fps_limit: Option<f32>,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_assignment_threshold() -> f32 { 0.25 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct FusionResult {
+    pub id: Uuid,
+    pub camera_id: Uuid,
+    pub detection_id: Uuid,
+    pub source_model_ids: Vec<Uuid>,
+    pub fused_confidence: f32,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Detection {
     pub id: Uuid,
     pub camera_id: Uuid,

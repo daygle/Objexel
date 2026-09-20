@@ -1,7 +1,8 @@
 use anyhow::Result;
 use objexel_actions::ActionDispatcher;
 use objexel_behaviour::BehaviourAnalyzer;
-use objexel_common::{Detection, Event, Observation, Track, ZoneEventType};
+use objexel_common::{Detection, Event, FusionResult, Observation, Track, ZoneEventType};
+use objexel_fusion::FusionEngine;
 use objexel_database::Database;
 use objexel_detector::{FrameTensor, ModelManager};
 use objexel_observations::ObservationEngine;
@@ -23,20 +24,39 @@ pub struct ObservationPipeline {
     database: Database,
     recorder: Recorder,
     behaviour: BehaviourAnalyzer,
+    fusion: FusionEngine,
 }
 
 impl ObservationPipeline {
     pub fn new(database: Database, recorder: Recorder) -> Self {
-        Self { models: ModelManager::default(), tracker: Arc::new(Mutex::new(Tracker::default())), zones: Arc::new(Mutex::new(ZoneEvaluator::default())), rules: Arc::new(Mutex::new(RuleEngine::default())), actions: ActionDispatcher::new(), observations: ObservationEngine::default(), database, recorder, behaviour: BehaviourAnalyzer::default() }
+        Self { models: ModelManager::default(), tracker: Arc::new(Mutex::new(Tracker::default())), zones: Arc::new(Mutex::new(ZoneEvaluator::default())), rules: Arc::new(Mutex::new(RuleEngine::default())), actions: ActionDispatcher::new(), observations: ObservationEngine::default(), database, recorder, behaviour: BehaviourAnalyzer::default(), fusion: FusionEngine::default() }
     }
 
     pub async fn process_frame(&self, frame: FrameTensor) -> Result<PipelineResult> {
         let camera_id = frame.camera_id;
-        let selected_model = self.database.active_model_for_camera(camera_id).await?;
-        let mut detections = self.models.detect_with_model(selected_model, frame).await?;
+        let assignments = self.database.list_model_assignments(Some(camera_id)).await?;
+        let mut raw_detections = Vec::new();
+        if assignments.is_empty() {
+            let selected_model = self.database.active_model_for_camera(camera_id).await?;
+            raw_detections = self.models.detect_with_model(selected_model, frame.clone()).await?;
+        } else {
+            let mut jobs = Vec::new();
+            for assignment in assignments.iter().filter(|item| item.enabled) {
+                let models = self.models.clone(); let input = frame.clone(); let model_id = assignment.model_id;
+                jobs.push(tokio::spawn(async move { models.detect_with_model(Some(model_id), input).await }));
+            }
+            for job in jobs { raw_detections.extend(job.await??); }
+        }
+        let mut detections = self.fusion.fuse(&assignments, raw_detections);
         let now = detections.first().map(|d| d.observed_at).unwrap_or_else(chrono::Utc::now);
         let tracks = self.tracker.lock().await.update(&mut detections, now);
-        for detection in &detections { self.database.insert_detection(detection).await?; }
+        for detection in &detections {
+            self.database.insert_detection(detection).await?;
+            if !assignments.is_empty() {
+                let source_model_ids = assignments.iter().filter(|assignment| assignment.enabled).map(|assignment| assignment.model_id).collect();
+                self.database.insert_fusion_result(&FusionResult { id: uuid::Uuid::new_v4(), camera_id, detection_id: detection.id, source_model_ids, fused_confidence: detection.confidence, created_at: now }).await?;
+            }
+        }
         for track in &tracks { self.database.upsert_track(track).await?; }
         let behaviours: Vec<_> = tracks.iter().filter_map(|track| self.behaviour.analyze(track, now)).collect();
         for behaviour in &behaviours { self.database.insert_behaviour(behaviour).await?; }

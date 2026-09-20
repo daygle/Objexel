@@ -1,6 +1,7 @@
 use anyhow::Context;
 use objexel_analytics::{AnalyticsMetric, AnalyticsSnapshot, AnalyticsSummary};
 use objexel_behaviour::Behaviour;
+use objexel_common::{CreateModelAssignment, FusionResult, ModelAssignment};
 use objexel_search::{SearchFilters, SearchResult};
 use objexel_common::{Action, ActionExecution, BenchmarkResult, Camera, CameraStatus, Clip, CreateAction, CreateCamera, CreateModel, CreateNotificationProvider, CreateNotificationTemplate, CreateRule, CreateZone, Detection, Event, EventSeverity, Model, Notification, NotificationProvider, NotificationTemplate, Observation, Recording, Rule, RuleCondition, RuleConditionInput, Snapshot, Track, UpdateAction, UpdateCamera, UpdateNotificationProvider, UpdateRule, UpdateZone, Zone, ZoneEvent, ZoneEventType};
 use serde_json::Value;
@@ -130,6 +131,34 @@ impl Database {
         let result = sqlx::query("INSERT INTO camera_models (camera_id,model_id) VALUES ($1,$2) ON CONFLICT (camera_id) DO UPDATE SET model_id=EXCLUDED.model_id, assigned_at=NOW()")
             .bind(camera_id).bind(model_id).execute(&self.pool).await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn list_model_assignments(&self, camera_id: Option<Uuid>) -> anyhow::Result<Vec<ModelAssignment>> {
+        let rows = match camera_id {
+            Some(id) => sqlx::query("SELECT id,camera_id,model_id,priority,confidence_threshold,fps_limit,enabled FROM model_assignments WHERE camera_id=$1 ORDER BY priority DESC").bind(id).fetch_all(&self.pool).await?,
+            None => sqlx::query("SELECT id,camera_id,model_id,priority,confidence_threshold,fps_limit,enabled FROM model_assignments ORDER BY camera_id,priority DESC").fetch_all(&self.pool).await?,
+        };
+        rows.into_iter().map(model_assignment_from_row).collect()
+    }
+
+    pub async fn create_model_assignment(&self, input: CreateModelAssignment) -> anyhow::Result<ModelAssignment> {
+        let id = Uuid::new_v4();
+        sqlx::query("INSERT INTO model_assignments (id,camera_id,model_id,priority,confidence_threshold,fps_limit,enabled) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (camera_id,model_id) DO UPDATE SET priority=EXCLUDED.priority,confidence_threshold=EXCLUDED.confidence_threshold,fps_limit=EXCLUDED.fps_limit,enabled=EXCLUDED.enabled")
+            .bind(id).bind(input.camera_id).bind(input.model_id).bind(input.priority).bind(input.confidence_threshold.clamp(0.0,1.0)).bind(input.fps_limit).bind(input.enabled).execute(&self.pool).await?;
+        self.list_model_assignments(Some(input.camera_id)).await?.into_iter().find(|item| item.model_id == input.model_id).context("assignment was not returned after insert")
+    }
+
+    pub async fn list_fusion_results(&self, camera_id: Option<Uuid>, limit: i64) -> anyhow::Result<Vec<FusionResult>> {
+        let rows = match camera_id {
+            Some(id) => sqlx::query("SELECT id,camera_id,detection_id,source_model_ids,fused_confidence,created_at FROM fusion_results WHERE camera_id=$1 ORDER BY created_at DESC LIMIT $2").bind(id).bind(limit.clamp(1,500)).fetch_all(&self.pool).await?,
+            None => sqlx::query("SELECT id,camera_id,detection_id,source_model_ids,fused_confidence,created_at FROM fusion_results ORDER BY created_at DESC LIMIT $1").bind(limit.clamp(1,500)).fetch_all(&self.pool).await?,
+        };
+        rows.into_iter().map(fusion_result_from_row).collect()
+    }
+
+    pub async fn insert_fusion_result(&self, result: &FusionResult) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO fusion_results (id,camera_id,detection_id,source_model_ids,fused_confidence,created_at) VALUES ($1,$2,$3,$4,$5,$6)").bind(result.id).bind(result.camera_id).bind(result.detection_id).bind(serde_json::to_value(&result.source_model_ids)?).bind(result.fused_confidence).bind(result.created_at).execute(&self.pool).await?;
+        Ok(())
     }
 
     pub async fn active_model_for_camera(&self, camera_id: Uuid) -> anyhow::Result<Option<Uuid>> {
@@ -563,6 +592,9 @@ fn camera_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Camera> {
         updated_at: row.try_get("updated_at")?,
     })
 }
+
+fn model_assignment_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<ModelAssignment> { Ok(ModelAssignment { id: row.try_get("id")?, camera_id: row.try_get("camera_id")?, model_id: row.try_get("model_id")?, priority: row.try_get("priority")?, confidence_threshold: row.try_get("confidence_threshold")?, fps_limit: row.try_get("fps_limit")?, enabled: row.try_get("enabled")? }) }
+fn fusion_result_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<FusionResult> { Ok(FusionResult { id: row.try_get("id")?, camera_id: row.try_get("camera_id")?, detection_id: row.try_get("detection_id")?, source_model_ids: serde_json::from_value(row.try_get("source_model_ids")?)?, fused_confidence: row.try_get("fused_confidence")?, created_at: row.try_get("created_at")? }) }
 
 fn model_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Model> {
     Ok(Model { id: row.try_get("id")?, name: row.try_get("name")?, version: row.try_get("version")?, model_type: row.try_get("model_type")?, path: row.try_get("path")?, input_width: row.try_get("input_width")?, input_height: row.try_get("input_height")?, class_list: serde_json::from_value(row.try_get("class_list")?)?, enabled: row.try_get("enabled")?, default_model: row.try_get("default_model")?, created_at: row.try_get("created_at")? })

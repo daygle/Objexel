@@ -18,6 +18,7 @@ members = [
     "crates/search",
     "crates/analytics",
     "crates/behaviour",
+    "crates/fusion",
     "crates/api",
 ]
 
