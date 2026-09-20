@@ -1,6 +1,5 @@
 use argon2::{password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString}, Argon2};
 use chrono::{DateTime, Utc};
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -61,8 +60,7 @@ pub fn verify_password(password: &str, encoded: &str) -> bool {
 }
 
 pub fn generate_token() -> String {
-    let mut bytes = [0_u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    let bytes: [u8; 32] = rand::random();
     hex::encode(bytes)
 }
 
