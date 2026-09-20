@@ -12,5 +12,6 @@ objexel-database = { path = "../database" }
 objexel-detector = { path = "../detector" }
 objexel-observations = { path = "../observations" }
 objexel-tracker = { path = "../tracker" }
+objexel-zones = { path = "../zones" }
 tokio.workspace = true
 tracing.workspace = true

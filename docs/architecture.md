@@ -33,5 +33,5 @@ RTSP cameras -> camera worker -> detector/tracker workers -> event engine
 
 ## Roadmap
 
-- **Phase 5:** zones, event rules, and richer WebSocket observation events.
-- **Phase 6:** recordings, retention, notifications, authentication, and production deployment manifests.
+- **Phase 6:** event rules and richer WebSocket observation events.
+- **Phase 7:** recordings, retention, notifications, authentication, and production deployment manifests.

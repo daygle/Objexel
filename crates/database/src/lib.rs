@@ -1,5 +1,5 @@
 use anyhow::Context;
-use objexel_common::{Camera, CameraStatus, CreateCamera, Detection, Model, Observation, Track, UpdateCamera};
+use objexel_common::{Camera, CameraStatus, CreateCamera, CreateZone, Detection, Model, Observation, Track, UpdateCamera, UpdateZone, Zone, ZoneEvent, ZoneEventType};
 use serde_json::Value;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
 use uuid::Uuid;
@@ -159,6 +159,50 @@ impl Database {
         Ok(())
     }
 
+    pub async fn list_zones(&self, camera_id: Option<Uuid>) -> anyhow::Result<Vec<Zone>> {
+        let rows = match camera_id {
+            Some(camera_id) => sqlx::query("SELECT id, camera_id, name, polygon_coordinates, colour, enabled, created_at FROM zones WHERE camera_id = $1 ORDER BY name").bind(camera_id).fetch_all(&self.pool).await?,
+            None => sqlx::query("SELECT id, camera_id, name, polygon_coordinates, colour, enabled, created_at FROM zones ORDER BY name").fetch_all(&self.pool).await?,
+        };
+        rows.into_iter().map(zone_from_row).collect()
+    }
+
+    pub async fn get_zone(&self, id: Uuid) -> anyhow::Result<Option<Zone>> {
+        let row = sqlx::query("SELECT id, camera_id, name, polygon_coordinates, colour, enabled, created_at FROM zones WHERE id = $1").bind(id).fetch_optional(&self.pool).await?;
+        row.map(zone_from_row).transpose()
+    }
+
+    pub async fn create_zone(&self, input: CreateZone) -> anyhow::Result<Zone> {
+        let id = Uuid::new_v4();
+        sqlx::query("INSERT INTO zones (id, camera_id, name, polygon_coordinates, colour, enabled) VALUES ($1,$2,$3,$4,$5,$6)")
+            .bind(id).bind(input.camera_id).bind(input.name).bind(serde_json::to_value(input.polygon_coordinates)?).bind(input.colour).bind(input.enabled).execute(&self.pool).await?;
+        self.get_zone(id).await?.context("zone was not returned after insert")
+    }
+
+    pub async fn update_zone(&self, id: Uuid, input: UpdateZone) -> anyhow::Result<Option<Zone>> {
+        let polygon = input.polygon_coordinates.map(serde_json::to_value).transpose()?;
+        let result = sqlx::query("UPDATE zones SET name = COALESCE($2,name), polygon_coordinates = COALESCE($3,polygon_coordinates), colour = COALESCE($4,colour), enabled = COALESCE($5,enabled) WHERE id = $1")
+            .bind(id).bind(input.name).bind(polygon).bind(input.colour).bind(input.enabled).execute(&self.pool).await?;
+        if result.rows_affected() == 0 { return Ok(None); }
+        self.get_zone(id).await
+    }
+
+    pub async fn delete_zone(&self, id: Uuid) -> anyhow::Result<bool> {
+        let result = sqlx::query("DELETE FROM zones WHERE id = $1").bind(id).execute(&self.pool).await?;
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn list_zone_events(&self, limit: i64) -> anyhow::Result<Vec<ZoneEvent>> {
+        let rows = sqlx::query("SELECT id, zone_id, camera_id, track_id, event_type, occurred_at, duration_ms FROM zone_events ORDER BY occurred_at DESC LIMIT $1").bind(limit.clamp(1, 500)).fetch_all(&self.pool).await?;
+        rows.into_iter().map(zone_event_from_row).collect()
+    }
+
+    pub async fn insert_zone_event(&self, event: &ZoneEvent) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO zone_events (id, zone_id, camera_id, track_id, event_type, occurred_at, duration_ms) VALUES ($1,$2,$3,$4,$5,$6,$7)")
+            .bind(event.id).bind(event.zone_id).bind(event.camera_id).bind(event.track_id).bind(zone_event_type_string(&event.event_type)).bind(event.occurred_at).bind(event.duration_ms).execute(&self.pool).await?;
+        Ok(())
+    }
+
     pub async fn delete_camera(&self, id: Uuid) -> anyhow::Result<bool> {
         let result = sqlx::query("DELETE FROM cameras WHERE id = $1")
             .bind(id)
@@ -205,6 +249,17 @@ fn track_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Track> {
 fn observation_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Observation> {
     Ok(Observation { id: row.try_get("id")?, camera_id: row.try_get("camera_id")?, track_id: row.try_get("track_id")?, observation_type: row.try_get("observation_type")?, summary: row.try_get("summary")?, created_at: row.try_get("created_at")? })
 }
+
+fn zone_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<Zone> {
+    Ok(Zone { id: row.try_get("id")?, camera_id: row.try_get("camera_id")?, name: row.try_get("name")?, polygon_coordinates: serde_json::from_value(row.try_get("polygon_coordinates")?)?, colour: row.try_get("colour")?, enabled: row.try_get("enabled")?, created_at: row.try_get("created_at")? })
+}
+
+fn zone_event_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<ZoneEvent> {
+    let event_type = match row.try_get::<String, _>("event_type")?.as_str() { "entered" => ZoneEventType::Entered, "exited" => ZoneEventType::Exited, _ => ZoneEventType::Occupied };
+    Ok(ZoneEvent { id: row.try_get("id")?, zone_id: row.try_get("zone_id")?, camera_id: row.try_get("camera_id")?, track_id: row.try_get("track_id")?, event_type, occurred_at: row.try_get("occurred_at")?, duration_ms: row.try_get("duration_ms")? })
+}
+
+fn zone_event_type_string(event_type: &ZoneEventType) -> &'static str { match event_type { ZoneEventType::Entered => "entered", ZoneEventType::Exited => "exited", ZoneEventType::Occupied => "occupied" } }
 
 fn status_string(status: &CameraStatus) -> &'static str {
     match status {

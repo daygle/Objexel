@@ -8,9 +8,10 @@ use axum::{
 };
 use chrono::Utc;
 use objexel_camera::{CameraManager, CameraService};
-use objexel_common::{Camera, CameraStatus, CameraTestResult, CreateCamera, Detection, HealthResponse, Model, Observation, StreamMetadata, Track, UpdateCamera};
+use objexel_common::{Camera, CameraStatus, CameraTestResult, CreateCamera, CreateZone, Detection, HealthResponse, Model, Observation, StreamMetadata, Track, UpdateCamera, UpdateZone, Zone, ZoneEvent};
 use objexel_detector::ModelConfig;
 use objexel_pipeline::ObservationPipeline;
+use objexel_zones::validate_polygon;
 use objexel_database::Database;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -27,8 +28,8 @@ pub struct AppState {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, list_models, reload_models, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation),
-    components(schemas(Camera, CreateCamera, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, Detection, Track, Observation)),
+    paths(health, ready, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, list_models, reload_models, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events),
+    components(schemas(Camera, CreateCamera, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent)),
     tags((name = "cameras", description = "Camera management and RTSP ingestion"))
 )]
 pub struct ApiDoc;
@@ -38,12 +39,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/cameras", get(list_cameras).post(create_camera))
         .route("/api/cameras/:id", get(get_camera).put(update_camera).patch(update_camera).delete(delete_camera))
         .route("/api/cameras/:id/test", axum::routing::post(test_camera))
-        .route("/api/cameras/:id/snapshot", axum::routing::post(snapshot_camera))
+        .route("/api/cameras/:id/snapshot", get(snapshot_camera).post(snapshot_camera))
         .route("/api/cameras/:id/status", get(camera_status))
         .route("/api/v1/cameras", get(list_cameras).post(create_camera))
         .route("/api/v1/cameras/:id", get(get_camera).put(update_camera).patch(update_camera).delete(delete_camera))
         .route("/api/v1/cameras/:id/test", axum::routing::post(test_camera))
-        .route("/api/v1/cameras/:id/snapshot", axum::routing::post(snapshot_camera))
+        .route("/api/v1/cameras/:id/snapshot", get(snapshot_camera).post(snapshot_camera))
         .route("/api/v1/cameras/:id/status", get(camera_status));
 
     Router::new()
@@ -60,6 +61,9 @@ pub fn router(state: AppState) -> Router {
         .route("/api/tracks/:id", get(get_track))
         .route("/api/observations", get(list_observations))
         .route("/api/observations/:id", get(get_observation))
+        .route("/api/zones", get(list_zones).post(create_zone))
+        .route("/api/zones/:id", get(get_zone).put(update_zone).delete(delete_zone))
+        .route("/api/zone-events", get(list_zone_events))
         .merge(camera_routes)
         .with_state(Arc::new(state))
         .layer(CorsLayer::permissive())
@@ -201,6 +205,39 @@ async fn list_observations(State(state): State<Arc<AppState>>, Query(query): Que
 #[utoipa::path(get, path = "/api/observations/{id}", tag = "observations", params(("id" = Uuid, Path)), responses((status = 200, body = Observation), (status = 404), (status = 503)))]
 async fn get_observation(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Observation>, ErrorResponse> {
     match database(&state)?.get_observation(id).await.map_err(internal_error)? { Some(item) => Ok(Json(item)), None => Err(not_found("observation not found")) }
+}
+
+#[utoipa::path(get, path = "/api/zones", tag = "zones", responses((status = 200, body = [Zone]), (status = 503)))]
+async fn list_zones(State(state): State<Arc<AppState>>) -> Result<Json<Vec<Zone>>, ErrorResponse> {
+    database(&state)?.list_zones(None).await.map(Json).map_err(internal_error)
+}
+
+#[utoipa::path(post, path = "/api/zones", tag = "zones", request_body = CreateZone, responses((status = 201, body = Zone), (status = 400), (status = 503)))]
+async fn create_zone(State(state): State<Arc<AppState>>, Json(input): Json<CreateZone>) -> Result<(StatusCode, Json<Zone>), ErrorResponse> {
+    validate_polygon(&input.polygon_coordinates).map_err(|error| bad_request(&error.to_string()))?;
+    if input.name.trim().is_empty() { return Err(bad_request("zone name cannot be empty")); }
+    database(&state)?.create_zone(input).await.map(|zone| (StatusCode::CREATED, Json(zone))).map_err(internal_error)
+}
+
+#[utoipa::path(get, path = "/api/zones/{id}", tag = "zones", params(("id" = Uuid, Path)), responses((status = 200, body = Zone), (status = 404), (status = 503)))]
+async fn get_zone(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<Json<Zone>, ErrorResponse> {
+    match database(&state)?.get_zone(id).await.map_err(internal_error)? { Some(zone) => Ok(Json(zone)), None => Err(not_found("zone not found")) }
+}
+
+#[utoipa::path(put, path = "/api/zones/{id}", tag = "zones", params(("id" = Uuid, Path)), request_body = UpdateZone, responses((status = 200, body = Zone), (status = 400), (status = 404), (status = 503)))]
+async fn update_zone(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>, Json(input): Json<UpdateZone>) -> Result<Json<Zone>, ErrorResponse> {
+    if let Some(polygon) = &input.polygon_coordinates { validate_polygon(polygon).map_err(|error| bad_request(&error.to_string()))?; }
+    match database(&state)?.update_zone(id, input).await.map_err(internal_error)? { Some(zone) => Ok(Json(zone)), None => Err(not_found("zone not found")) }
+}
+
+#[utoipa::path(delete, path = "/api/zones/{id}", tag = "zones", params(("id" = Uuid, Path)), responses((status = 204), (status = 404), (status = 503)))]
+async fn delete_zone(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<StatusCode, ErrorResponse> {
+    if database(&state)?.delete_zone(id).await.map_err(internal_error)? { Ok(StatusCode::NO_CONTENT) } else { Err(not_found("zone not found")) }
+}
+
+#[utoipa::path(get, path = "/api/zone-events", tag = "zones", responses((status = 200, body = [ZoneEvent]), (status = 503)))]
+async fn list_zone_events(State(state): State<Arc<AppState>>, Query(query): Query<LimitQuery>) -> Result<Json<Vec<ZoneEvent>>, ErrorResponse> {
+    database(&state)?.list_zone_events(query.limit.unwrap_or(100)).await.map(Json).map_err(internal_error)
 }
 
 async fn events_socket(ws: WebSocketUpgrade) -> impl axum::response::IntoResponse { ws.on_upgrade(|_socket| async move { tracing::debug!("event websocket connected"); }) }

@@ -43,8 +43,14 @@ The API listens on `0.0.0.0:8080` by default. `GET /health` does not require a d
 - `GET /api/detections` and `GET /api/detections/:id`
 - `GET /api/tracks` and `GET /api/tracks/:id`
 - `GET /api/observations` and `GET /api/observations/:id`
+- `GET /api/zones`
+- `GET /api/zones/:id`
+- `POST /api/zones`
+- `PUT /api/zones/:id`
+- `DELETE /api/zones/:id`
+- `GET /api/zone-events`
 
-The `/api/v1/cameras` routes remain available as compatibility aliases. See [`docs/observation-pipeline.md`](docs/observation-pipeline.md) for the Phase 4 architecture.
+The `/api/v1/cameras` routes remain available as compatibility aliases. See [`docs/observation-pipeline.md`](docs/observation-pipeline.md) and [`docs/spatial-zones.md`](docs/spatial-zones.md) for pipeline and spatial architecture.
 
 Run checks with:
 

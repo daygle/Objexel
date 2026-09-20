@@ -114,6 +114,59 @@ pub struct Observation {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct PolygonPoint {
+    pub x: f32,
+    pub y: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Zone {
+    pub id: Uuid,
+    pub camera_id: Uuid,
+    pub name: String,
+    pub polygon_coordinates: Vec<PolygonPoint>,
+    pub colour: String,
+    pub enabled: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CreateZone {
+    pub camera_id: Uuid,
+    pub name: String,
+    pub polygon_coordinates: Vec<PolygonPoint>,
+    #[serde(default = "default_zone_colour")]
+    pub colour: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+fn default_zone_colour() -> String { "#74e0b4".into() }
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct UpdateZone {
+    pub name: Option<String>,
+    pub polygon_coordinates: Option<Vec<PolygonPoint>>,
+    pub colour: Option<String>,
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ZoneEventType { Entered, Exited, Occupied }
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ZoneEvent {
+    pub id: Uuid,
+    pub zone_id: Uuid,
+    pub camera_id: Uuid,
+    pub track_id: Uuid,
+    pub event_type: ZoneEventType,
+    pub occurred_at: DateTime<Utc>,
+    pub duration_ms: Option<i64>,
+}
+
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct HealthResponse {
     pub status: String,
