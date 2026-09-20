@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { api } from '$lib/api';
   type Metric = { label:string; count:number }; type Summary = { detections:number; events:number; observations:number; behaviours:number; top_objects:Metric[]; camera_activity:Metric[]; zone_activity:Metric[]; model_activity:Metric[]; detections_per_day:Metric[] };
   let summary: Summary = { detections:0, events:0, observations:0, behaviours:0, top_objects:[], camera_activity:[], zone_activity:[], model_activity:[], detections_per_day:[] }; let loading = true;
-  onMount(async () => { const response = await fetch('/api/analytics'); if (response.ok) summary = await response.json(); loading = false; });
+  onMount(async () => { const response = await api('/api/analytics'); if (response.ok) summary = await response.json(); loading = false; });
 </script>
 <svelte:head><title>Analytics · Objexel</title></svelte:head>
 <p class="eyebrow">Operational intelligence</p><h1>Analytics</h1><p class="muted">Understand what your cameras are seeing and where activity concentrates.</p>

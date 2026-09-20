@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { api, apiError } from '$lib/api';
   type Assignment = { id:string; camera_id:string; model_id:string; priority:number; confidence_threshold:number; fps_limit?:number; enabled:boolean };
   type Fusion = { id:string; camera_id:string; detection_id:string; source_model_ids:string[]; fused_confidence:number; created_at:string };
   type Camera = { id:string; name:string }; type Model = { id:string; name:string; version:string };
   let assignments: Assignment[] = []; let fusion: Fusion[] = []; let cameras: Camera[] = []; let models: Model[] = []; let message = '';
-  async function load() { const responses = await Promise.all([fetch('/api/model-assignments'), fetch('/api/fusion?limit=50'), fetch('/api/cameras'), fetch('/api/models')]); if (responses[0].ok) assignments = await responses[0].json(); if (responses[1].ok) fusion = await responses[1].json(); if (responses[2].ok) cameras = await responses[2].json(); if (responses[3].ok) models = await responses[3].json(); }
-  async function addAssignment() { const camera_id = cameras[0]?.id; const model_id = models[0]?.id; if (!camera_id || !model_id) { message = 'Add a camera and model first'; return; } const response = await fetch('/api/model-assignments', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({ camera_id, model_id, priority: assignments.length, confidence_threshold:.25, enabled:true }) }); message = response.ok ? 'Model assignment saved' : await response.text(); await load(); }
+  async function load() { const responses = await Promise.all([api('/api/model-assignments'), api('/api/fusion?limit=50'), api('/api/cameras'), api('/api/models')]); if (responses[0].ok) assignments = await responses[0].json(); if (responses[1].ok) fusion = await responses[1].json(); if (responses[2].ok) cameras = await responses[2].json(); if (responses[3].ok) models = await responses[3].json(); }
+  async function addAssignment() { const camera_id = cameras[0]?.id; const model_id = models[0]?.id; if (!camera_id || !model_id) { message = 'Add a camera and model first'; return; } const response = await api('/api/model-assignments', { method:'POST', json:{ camera_id, model_id, priority: assignments.length, confidence_threshold:.25, enabled:true } }); message = response.ok ? 'Model assignment saved' : await apiError(response); await load(); }
   onMount(load);
 </script>
 <svelte:head><title>AI Pipelines · Objexel</title></svelte:head>

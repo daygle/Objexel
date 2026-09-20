@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { api } from '$lib/api';
   type Event = { id:string; summary:string; event_type:string; severity:string; rule_id:string; created_at:string };
   let events: Event[] = []; let loading = true;
-  onMount(async () => { try { const response = await fetch('/api/events?limit=100'); if (response.ok) events = await response.json(); } finally { loading = false; } });
+  onMount(async () => { try { const response = await api('/api/events?limit=100'); if (response.ok) events = await response.json(); } finally { loading = false; } });
 </script>
 <svelte:head><title>Events · Objexel</title></svelte:head>
 <p class="eyebrow">Rule output</p><h1>Events</h1><p class="muted">The final intelligence layer generated from observations.</p>
