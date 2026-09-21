@@ -43,7 +43,7 @@ Objexel supports:
 - safe `tar.gz` and `zip` extraction with path traversal rejection
 - benchmark results and per-camera model assignments
 
-Catalog downloads are administrator-controlled and register disabled. Review, enable, benchmark, and activate models from **Models**. See [docs/model-management.md](docs/model-management.md).
+The **Models** page ships a built-in catalog of the YOLO11 and YOLO26 families for one-click, checksum-verified downloads. Hosting the ONNX assets is a one-time operator step — exact instructions in [docs/model-hosting-setup.md](docs/model-hosting-setup.md). Catalog downloads register disabled; review, enable, benchmark, and activate from **Models**. See [docs/model-management.md](docs/model-management.md).
 
 ## Updates
 

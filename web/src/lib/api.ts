@@ -73,6 +73,25 @@ export async function api(path: string, options: ApiOptions = {}): Promise<Respo
   return response;
 }
 
+/**
+ * True when the browser holds a working session — i.e. the session cookie was actually
+ * stored and is accepted by the API. Used right after login/setup to detect the case where
+ * the server issued a `Secure` cookie the browser dropped (plain-HTTP deployments), which
+ * otherwise looks like a silent bounce back to /login.
+ */
+export async function sessionActive(): Promise<boolean> {
+  try {
+    const response = await api('/api/auth/me', { redirectOnUnauthorized: false });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Guidance shown when authentication succeeds but no session cookie was persisted. */
+export const SESSION_NOT_STORED_MESSAGE =
+  'Signed in, but your browser did not store the session cookie. If you are reaching Objexel over plain HTTP, set OBJEXEL_COOKIE_SECURE=0 in the server .env and run `docker compose up -d` — or serve Objexel over HTTPS.';
+
 /** Extract a human-readable message from an error response (the API returns {"error": "..."}). */
 export async function apiError(response: Response): Promise<string> {
   const text = await response.text();
