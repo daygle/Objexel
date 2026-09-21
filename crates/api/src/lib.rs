@@ -135,7 +135,7 @@ pub fn router(state: AppState) -> Router {
         .route("/metrics", get(metrics))
         .route("/api/auth/login", post(login))
         .route("/api/auth/logout", post(logout))
-        .route("/api/auth/setup", post(setup_admin))
+        .route("/api/auth/setup", get(setup_status).post(setup_admin))
         .route("/api/auth/me", get(me))
         .route("/api/users", get(list_users).post(create_user))
         .route("/api/users/{id}", axum::routing::put(update_user).delete(delete_user))
@@ -363,6 +363,11 @@ async fn login(State(state): State<Arc<AppState>>, Json(input): Json<LoginReques
     database.insert_session(Uuid::new_v4(), user.id, &digest_token(&token), &digest_token(&csrf), Utc::now() + chrono::Duration::days(SESSION_DAYS)).await.map_err(internal_error)?;
     let _ = database.audit(Some(user.id), "auth.login", "user", Some(user.id), json!({})).await;
     session_response(AuthResponse { user, csrf_token: csrf }, &token)
+}
+
+async fn setup_status(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ErrorResponse> {
+    let count = database(&state)?.user_count().await.map_err(internal_error)?;
+    Ok(Json(json!({ "setup_required": count == 0 })))
 }
 
 async fn setup_admin(State(state): State<Arc<AppState>>, Json(input): Json<CreateUser>) -> Result<(HeaderMap, Json<AuthResponse>), ErrorResponse> {
