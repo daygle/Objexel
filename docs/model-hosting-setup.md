@@ -9,7 +9,25 @@ Objexel server can reach them. The built-in catalog points at a GitHub release n
 These are the steps **you** perform once. After this, every deployment gets one-click,
 checksum-verified model downloads with no further action.
 
-## Prerequisites
+## Option A — publish from GitHub Actions (no Python, recommended)
+
+The **Publish model weights** workflow (`.github/workflows/publish-models.yml`) exports the
+whole family and uploads it to the release for you — nothing to install locally.
+
+1. Go to the repo's **Actions** tab → **Publish model weights** → **Run workflow**.
+2. Leave the tag as `models-v1` (or enter another) and start it.
+3. When it finishes, the `models-v1` release exists with all ten ONNX assets attached, and
+   the workflow has reconciled `models/catalog.json` to match.
+
+You can also trigger it by pushing a tag, e.g. `git tag models-v1 && git push origin models-v1`.
+
+Then jump to [Step 5 — Verify in the app](#step-5--verify-in-the-app).
+
+## Option B — export locally
+
+Use this if you would rather build the files on your own machine. It needs Python.
+
+### Prerequisites
 
 - Python 3.9+ with `pip`
 - Push access to `daygle/Objexel` (to create the release)
