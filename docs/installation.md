@@ -4,7 +4,6 @@
 
 - Debian 13 (recommended), Ubuntu 24.04+, or a Proxmox VM
 - 4 CPU cores and 8 GB RAM minimum; add RAM for more cameras/models
-- x86-64 CPU with AVX2 support (check with `grep -o avx2 /proc/cpuinfo`)
 - Docker Engine with the Compose v2 plugin (installation steps below) for the recommended deployment
 - SSD storage for the database and model files; separate storage for recordings
 
