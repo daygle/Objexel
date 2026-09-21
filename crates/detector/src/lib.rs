@@ -161,9 +161,24 @@ fn decode_output(dims: &[usize], values: &[f32], num_labels: usize, confidence_t
     let input_width = if input_width > 0.0 { input_width } else { 640.0 };
     let input_height = if input_height > 0.0 { input_height } else { 640.0 };
 
-    // Establish the (features, anchors) axes for a 2-D head, if this is one.
+    // Establish the (features, anchors, features_first) axes for a 2-D head, if this is
+    // one. When the label count is known, the feature axis is the one whose length is
+    // `4 + C` (anchor-free) or `5 + C` (objectness) — this is robust regardless of which
+    // axis is larger. Otherwise fall back to assuming the smaller axis holds the features
+    // (real exports carry far more anchors than feature channels).
     let two_dim = match meaningful.as_slice() {
-        [a, b] => Some(if a <= b { (*a, *b, true) } else { (*b, *a, false) }),
+        [d0, d1] => {
+            let (d0, d1) = (*d0, *d1);
+            if num_labels > 0 && (d0 == num_labels + 4 || d0 == num_labels + 5) {
+                Some((d0, d1, true))
+            } else if num_labels > 0 && (d1 == num_labels + 4 || d1 == num_labels + 5) {
+                Some((d1, d0, false))
+            } else if d0 <= d1 {
+                Some((d0, d1, true))
+            } else {
+                Some((d1, d0, false))
+            }
+        }
         _ => None,
     };
     // A known-label-count anchor head takes priority so that a genuine 2-class
