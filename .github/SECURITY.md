@@ -12,7 +12,7 @@ release; please upgrade to it before reporting an issue found on an older build.
 
 ## Reporting a vulnerability
 
-Please report security vulnerabilities **privately** — do not open a public
+Please report security vulnerabilities **privately** - do not open a public
 issue, pull request, or discussion for them.
 
 Use GitHub's private vulnerability reporting:

@@ -6,15 +6,15 @@ Phase 3 uses the system `ffprobe` binary for RTSP metadata/health checks and `ff
 
 All endpoints are available under `/api/cameras`; the `/api/v1/cameras` aliases remain for compatibility.
 
-- `GET /api/cameras` — list cameras and persisted health fields.
-- `POST /api/cameras` — create a camera with `name`, `rtsp_url`, and optional `enabled`.
-- `GET /api/cameras/{id}` — retrieve one camera.
-- `PUT /api/cameras/{id}` — replace supplied camera fields; `PATCH` is also accepted.
-- `DELETE /api/cameras/{id}` — remove a camera.
-- `POST /api/cameras/{id}/test` — run an RTSP probe and return status, latency, and stream metadata.
-- `POST /api/cameras/{id}/snapshot` — capture and return `image/jpeg` bytes.
-- `GET /api/cameras/{id}/status` — retrieve persisted status and timestamps.
-- `GET /api/openapi.json` — generated OpenAPI document.
+- `GET /api/cameras` - list cameras and persisted health fields.
+- `POST /api/cameras` - create a camera with `name`, `rtsp_url`, and optional `enabled`.
+- `GET /api/cameras/{id}` - retrieve one camera.
+- `PUT /api/cameras/{id}` - replace supplied camera fields; `PATCH` is also accepted.
+- `DELETE /api/cameras/{id}` - remove a camera.
+- `POST /api/cameras/{id}/test` - run an RTSP probe and return status, latency, and stream metadata.
+- `POST /api/cameras/{id}/snapshot` - capture and return `image/jpeg` bytes.
+- `GET /api/cameras/{id}/status` - retrieve persisted status and timestamps.
+- `GET /api/openapi.json` - generated OpenAPI document.
 
 ## Health and reconnect behavior
 

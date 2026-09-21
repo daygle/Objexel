@@ -11,7 +11,7 @@ export type LiveHandlers = {
 /**
  * Open the live-events WebSocket (/api/v1/events) and stream messages to the handlers.
  * The same-origin handshake carries the session cookie, so the server authenticates it.
- * Reconnects with capped exponential backoff. Returns a disposer to close the socket —
+ * Reconnects with capped exponential backoff. Returns a disposer to close the socket -
  * call it from onMount's cleanup.
  */
 export function subscribeLiveEvents(handlers: LiveHandlers): () => void {

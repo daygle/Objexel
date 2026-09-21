@@ -17,7 +17,7 @@ This script is the source of the ONNX assets: the SHA-256 digests it writes into
 models/catalog.json are exactly what Objexel verifies after download, so the files you
 upload to the release must be the ones this run produced. Because the script rewrites
 models/catalog.json to match its own output, the manifest and the uploaded files stay
-consistent even if a newer ultralytics/torch changes the bytes — just commit the
+consistent even if a newer ultralytics/torch changes the bytes - just commit the
 regenerated catalog.json. The committed catalog.json in this repo was produced with
 ultralytics 8.4.157 / torch 2.14 / opset 12.
 """

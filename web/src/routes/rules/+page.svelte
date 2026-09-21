@@ -8,7 +8,7 @@
 
   let rules: Rule[] = []; let actions: Action[] = []; let loading = true; let message = '';
 
-  // Editor state — id null means "new rule".
+  // Editor state - id null means "new rule".
   type ConditionDraft = { object_class:string; observation_type:string; behaviour_type:string; confidence:string; duration:string };
   type Draft = { id:string|null; name:string; description:string; severity:string; cooldown:number; suppression:number; conditions:ConditionDraft[]; actionIds:string[] };
   const emptyCondition = (): ConditionDraft => ({ object_class:'', observation_type:'', behaviour_type:'', confidence:'', duration:'' });
@@ -84,7 +84,7 @@
   const actionName = (id: string) => actions.find((item) => item.id === id)?.name ?? id.slice(0, 8);
 </script>
 <svelte:head><title>Rules · Objexel</title></svelte:head>
-<p class="eyebrow">Decision layer</p><h1>Rules</h1><p class="muted">Observations describe what happened. Rules decide whether it matters — and which actions fire in response.</p>
+<p class="eyebrow">Decision layer</p><h1>Rules</h1><p class="muted">Observations describe what happened. Rules decide whether it matters - and which actions fire in response.</p>
 {#if message}<p class="pill">{message}</p>{/if}
 
 <section class="card editor">
@@ -117,7 +117,7 @@
   <div class="editor-actions"><button on:click={save} disabled={saving || !draft.name.trim()}>{saving ? 'Saving…' : (draft.id ? 'Save changes' : 'Create rule')}</button></div>
 </section>
 
-{#if loading}<div class="empty">Loading rules…</div>{:else if rules.length === 0}<div class="empty">No rules configured. Add a rule above for object, zone, confidence, or duration conditions.</div>{:else}<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin-top:32px">{#each rules as rule}<article class="card"><div class="row"><div><h2>{rule.name}</h2><p class="muted">{rule.description || 'No description'}</p></div><button class:active={rule.enabled} class="toggle" on:click={() => toggle(rule)}>{rule.enabled ? 'Enabled' : 'Disabled'}</button></div><div class="rule-meta"><span class="pill">{rule.severity}</span><span>{rule.conditions.length} conditions</span><span>{rule.cooldown_seconds}s cooldown</span></div>{#each rule.conditions as condition}<div class="condition">{condition.object_class || 'any object'} · {condition.behaviour_type || condition.observation_type || 'any observation'}{#if condition.confidence_threshold != null} · ≥{Math.round(condition.confidence_threshold*100)}%{/if}{#if condition.minimum_duration_ms} · {condition.minimum_duration_ms/1000}s minimum{/if}</div>{/each}<div class="links">{#if rule.action_ids.length === 0}<span class="muted small">No actions linked — this rule records events but triggers nothing.</span>{:else}{#each rule.action_ids as id}<span class="pill link">{actionName(id)}</span>{/each}{/if}</div><div class="editor-actions"><button class="ghost" on:click={() => editRule(rule)}>Edit</button><button class="danger" on:click={() => remove(rule)}>Delete</button></div></article>{/each}</div>{/if}
+{#if loading}<div class="empty">Loading rules…</div>{:else if rules.length === 0}<div class="empty">No rules configured. Add a rule above for object, zone, confidence, or duration conditions.</div>{:else}<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin-top:32px">{#each rules as rule}<article class="card"><div class="row"><div><h2>{rule.name}</h2><p class="muted">{rule.description || 'No description'}</p></div><button class:active={rule.enabled} class="toggle" on:click={() => toggle(rule)}>{rule.enabled ? 'Enabled' : 'Disabled'}</button></div><div class="rule-meta"><span class="pill">{rule.severity}</span><span>{rule.conditions.length} conditions</span><span>{rule.cooldown_seconds}s cooldown</span></div>{#each rule.conditions as condition}<div class="condition">{condition.object_class || 'any object'} · {condition.behaviour_type || condition.observation_type || 'any observation'}{#if condition.confidence_threshold != null} · ≥{Math.round(condition.confidence_threshold*100)}%{/if}{#if condition.minimum_duration_ms} · {condition.minimum_duration_ms/1000}s minimum{/if}</div>{/each}<div class="links">{#if rule.action_ids.length === 0}<span class="muted small">No actions linked - this rule records events but triggers nothing.</span>{:else}{#each rule.action_ids as id}<span class="pill link">{actionName(id)}</span>{/each}{/if}</div><div class="editor-actions"><button class="ghost" on:click={() => editRule(rule)}>Edit</button><button class="danger" on:click={() => remove(rule)}>Delete</button></div></article>{/each}</div>{/if}
 <style>
   h2{margin:0 0 5px}
   .editor{margin-top:28px;display:grid;gap:14px}

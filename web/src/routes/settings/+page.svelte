@@ -49,10 +49,10 @@
   <section class="card">
     <h2>System</h2>
     <div class="info-rows">
-      <div class="info-row"><span class="label">Version</span><span>{update?.current_version ?? '—'}</span></div>
-      <div class="info-row"><span class="label">Uptime</span><span>{metrics ? formatUptime(metrics.uptime_seconds) : '—'}</span></div>
-      <div class="info-row"><span class="label">HTTP requests</span><span>{metrics?.http_requests_total?.toLocaleString() ?? '—'}</span></div>
-      <div class="info-row"><span class="label">Database</span><span class:ok={metrics?.database === 'ok'}>{metrics?.database ?? '—'}</span></div>
+      <div class="info-row"><span class="label">Version</span><span>{update?.current_version ?? '-'}</span></div>
+      <div class="info-row"><span class="label">Uptime</span><span>{metrics ? formatUptime(metrics.uptime_seconds) : '-'}</span></div>
+      <div class="info-row"><span class="label">HTTP requests</span><span>{metrics?.http_requests_total?.toLocaleString() ?? '-'}</span></div>
+      <div class="info-row"><span class="label">Database</span><span class:ok={metrics?.database === 'ok'}>{metrics?.database ?? '-'}</span></div>
     </div>
   </section>
 
@@ -69,10 +69,10 @@
   <section class="card">
     <h2>Updates</h2>
     <div class="info-rows">
-      <div class="info-row"><span class="label">Current</span><span>{update?.current_version ?? '—'}</span></div>
+      <div class="info-row"><span class="label">Current</span><span>{update?.current_version ?? '-'}</span></div>
       <div class="info-row">
         <span class="label">Latest</span>
-        <span>{#if update?.latest_version}{update.latest_version}{#if update.update_available} <span class="badge">available</span>{/if}{:else}—{/if}</span>
+        <span>{#if update?.latest_version}{update.latest_version}{#if update.update_available} <span class="badge">available</span>{/if}{:else}-{/if}</span>
       </div>
       {#if update?.release_url}
         <div class="info-row"><span class="label">Release</span><a href={update.release_url} target="_blank" rel="noreferrer">View notes</a></div>

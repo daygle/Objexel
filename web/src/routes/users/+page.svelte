@@ -75,7 +75,7 @@
       <td class="actions"><button on:click={() => saveEdit(user)}>Save</button><button class="ghost" on:click={cancelEdit}>Cancel</button></td>
     {:else}
       <td>{user.username}</td>
-      <td class="muted">{user.email ?? '—'}</td>
+      <td class="muted">{user.email ?? '-'}</td>
       <td><span class="pill">{user.role}</span></td>
       <td>{user.enabled ? 'Enabled' : 'Disabled'}</td>
       <td class="muted">{new Date(user.created_at).toLocaleDateString()}</td>

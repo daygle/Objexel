@@ -1,4 +1,4 @@
-# End-to-End Validation — Live Detection Pipeline
+# End-to-End Validation - Live Detection Pipeline
 
 ## Overview
 
@@ -22,7 +22,7 @@ setup, scenario execution, and expected results.
 
 ## Test Infrastructure
 
-### Docker Compose — `docker-compose.validation.yml`
+### Docker Compose - `docker-compose.validation.yml`
 
 The repository includes a runnable validation stack with PostgreSQL, MediaMTX, a synthetic RTSP camera, and Mailpit. Use that file directly; the abbreviated example below describes the services it provides.
 
@@ -42,7 +42,7 @@ services:
       interval: 2s
       retries: 10
 
-  # Fake RTSP camera — generates a test pattern with a moving object
+  # Fake RTSP camera - generates a test pattern with a moving object
   rtsp-camera-1:
     image: alpine:3.19
     depends_on: []
@@ -108,7 +108,7 @@ export OBJEXEL_MODEL_DIR="$PWD/models"
 cargo run --release -p objexel-api
 ```
 
-### API Calls — Bootstrap Camera + Model + Rule
+### API Calls - Bootstrap Camera + Model + Rule
 
 ```bash
 # 1. Create admin user
@@ -224,7 +224,7 @@ curl -s "http://localhost:8080/api/events?limit=5" -b cookies.txt | jq '.[].summ
 curl -s "http://localhost:8080/api/action-executions?limit=5" -b cookies.txt | jq '.[].status'
 ```
 
-### Expected Results — Single Camera
+### Expected Results - Single Camera
 
 | Metric | Expected |
 |---|---|
@@ -294,7 +294,7 @@ curl -s http://localhost:8080/metrics -b cookies.txt | jq .
 # Expected: cameras_total=3, cameras_online=3, active_tracks=3+
 ```
 
-### Expected Results — Three Cameras
+### Expected Results - Three Cameras
 
 | Metric | Expected |
 |---|---|
@@ -406,7 +406,7 @@ psql "$DATABASE_URL" -c "
 | Total pipeline latency | ~250-450 ms | ~250-450 ms (parallel) |
 | End-to-end (frame → email) | ~3-10 s | ~3-10 s |
 
-### Expected Performance (GPU — CUDA)
+### Expected Performance (GPU - CUDA)
 
 | Metric | Single Camera | Three Cameras |
 |---|---|---|

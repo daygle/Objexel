@@ -5,7 +5,7 @@ Objexel supports local ONNX registration and an administrator-controlled verifie
 ## Built-in default catalog
 
 Objexel ships a built-in catalog so the **Models** page is populated out of the box with
-one-click, checksum-verified downloads — no configuration required. It contains the full
+one-click, checksum-verified downloads - no configuration required. It contains the full
 YOLO11 and YOLO26 families (`n`, `s`, `m`, `l`, `x`), COCO-trained. Loading a model is:
 
 1. Open **Models**, pick a size, and select **Download** (progress is checksum-verified).
@@ -34,7 +34,7 @@ Produce the files with `scripts/export_models.py`, which writes both the `*.onnx
 and a matching `models/catalog.json`. The committed manifest was generated with
 `ultralytics==8.4.157` / `torch 2.14` / opset 12; using the same versions reproduces the
 exact bytes and digests. If you export with different versions, just commit the
-regenerated `models/catalog.json` — the manifest always matches the files the script
+regenerated `models/catalog.json` - the manifest always matches the files the script
 produced, and deployments reconcile via **Refresh catalog**.
 
 ### Updating models
@@ -119,7 +119,7 @@ Model files should be kept on persistent storage and backed up with the applicat
 - `POST /api/models/{id}/activate`
 - `GET /api/models/catalog`
 - `POST /api/models/catalog/import` with a JSON array of trusted catalog entries
-- `POST /api/models/catalog/refresh` — re-fetch the hosted manifest (`OBJEXEL_MODEL_CATALOG_URL`, default `models/catalog.json` on the default branch) and upsert its entries
+- `POST /api/models/catalog/refresh` - re-fetch the hosted manifest (`OBJEXEL_MODEL_CATALOG_URL`, default `models/catalog.json` on the default branch) and upsert its entries
 - `POST /api/models/catalog/{id}/download`
 - `GET /api/models/downloads/{id}`
 - `POST /api/models/reload`

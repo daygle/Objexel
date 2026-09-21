@@ -163,7 +163,7 @@ fn decode_output(dims: &[usize], values: &[f32], num_labels: usize, confidence_t
 
     // Establish the (features, anchors, features_first) axes for a 2-D head, if this is
     // one. When the label count is known, the feature axis is the one whose length is
-    // `4 + C` (anchor-free) or `5 + C` (objectness) — this is robust regardless of which
+    // `4 + C` (anchor-free) or `5 + C` (objectness) - this is robust regardless of which
     // axis is larger. Otherwise fall back to assuming the smaller axis holds the features
     // (real exports carry far more anchors than feature channels).
     let two_dim = match meaningful.as_slice() {

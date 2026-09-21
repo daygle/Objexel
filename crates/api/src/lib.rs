@@ -65,7 +65,7 @@ pub fn live_channel(capacity: usize) -> LiveEventSender {
 }
 
 /// Publish the meaningful signals from a processed frame to live-events subscribers.
-/// Raw detections are intentionally omitted — they are high-volume and would flood clients;
+/// Raw detections are intentionally omitted - they are high-volume and would flood clients;
 /// events, observations, and zone crossings are the actionable feed. When no client is
 /// connected `send` returns an error, which is ignored.
 pub fn broadcast_pipeline_result(sender: &LiveEventSender, result: &PipelineResult) {

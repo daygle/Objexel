@@ -33,7 +33,7 @@
       const dx = (pt.x - first.x) * canvas.width;
       const dy = (pt.y - first.y) * canvas.height;
       if (Math.sqrt(dx * dx + dy * dy) < 14) {
-        // Close polygon — save is triggered separately
+        // Close polygon - save is triggered separately
         return;
       }
     }
@@ -119,7 +119,7 @@
         const dx = (mousePos.x - first.x) * w;
         const dy = (mousePos.y - first.y) * h;
         if (Math.sqrt(dx * dx + dy * dy) < 14) {
-          // Snap indicator — highlight first point
+          // Snap indicator - highlight first point
           ctx.beginPath();
           ctx.arc(first.x * w, first.y * h, 10, 0, Math.PI * 2);
           ctx.fillStyle = hexToRgba(colour, 0.35);
@@ -209,10 +209,10 @@
         on:mousemove={onMouseMove}
         on:mouseleave={onMouseLeave}
       ></canvas>
-      {#if cameraId && previewError}<div class="preview-error">Preview unavailable — the camera may be offline. You can still place points.</div>{:else if !cameraId}<div class="preview-error">Select a camera to load a preview.</div>{/if}
+      {#if cameraId && previewError}<div class="preview-error">Preview unavailable - the camera may be offline. You can still place points.</div>{:else if !cameraId}<div class="preview-error">Select a camera to load a preview.</div>{/if}
     </div>
     <div class="preview-bar">
-      <span class="muted small">{points.length} points{canClose ? ' — click near point 1 to close' : ''}</span>
+      <span class="muted small">{points.length} points{canClose ? ' - click near point 1 to close' : ''}</span>
       {#if cameraZones.length > 0}
         <label class="live"><input type="checkbox" bind:checked={showOverlays} on:change={render} /> Show zones ({cameraZones.length})</label>
       {/if}

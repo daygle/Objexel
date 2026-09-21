@@ -165,7 +165,7 @@ struct ProbeStream {
 }
 
 // ---------------------------------------------------------------------------
-// FrameIngestor — RTSP frame decoding for the live processing pipeline
+// FrameIngestor - RTSP frame decoding for the live processing pipeline
 // ---------------------------------------------------------------------------
 
 /// A single decoded video frame in raw RGB24 format.

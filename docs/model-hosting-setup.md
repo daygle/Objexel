@@ -1,4 +1,4 @@
-# Model hosting — one-time setup (operator steps)
+# Model hosting - one-time setup (operator steps)
 
 Objexel ships a built-in catalog of the YOLO11 and YOLO26 families so the **Models**
 page offers one-click downloads. Because Ultralytics distributes PyTorch (`.pt`) weights
@@ -9,10 +9,10 @@ Objexel server can reach them. The built-in catalog points at a GitHub release n
 These are the steps **you** perform once. After this, every deployment gets one-click,
 checksum-verified model downloads with no further action.
 
-## Option A — publish from GitHub Actions (no Python, recommended)
+## Option A - publish from GitHub Actions (no Python, recommended)
 
 The **Publish model weights** workflow (`.github/workflows/publish-models.yml`) exports the
-whole family and uploads it to the release for you — nothing to install locally.
+whole family and uploads it to the release for you - nothing to install locally.
 
 1. Go to the repo's **Actions** tab → **Publish model weights** → **Run workflow**.
 2. Leave the tag as `models-v1` (or enter another) and start it.
@@ -23,7 +23,7 @@ You can also trigger it by pushing a tag, e.g. `git tag models-v1 && git push or
 
 Then [verify in the app](#verify-in-the-app).
 
-## Option B — export locally (advanced)
+## Option B - export locally (advanced)
 
 Only if you'd rather build the files on your own machine (air-gapped, custom weights, or
 no Actions access). Needs Python 3.9+ and ~1 GB disk. From a checkout of this repository:
@@ -35,7 +35,7 @@ python scripts/export_models.py --out dist/models
 
 This writes the ten ONNX files to `dist/models/` and rewrites `models/catalog.json` with
 their digests. Then create a `models-v1` release, upload every `dist/models/*.onnx` as
-assets — keeping the exact filenames so the `models/catalog.json` URLs resolve — and
+assets - keeping the exact filenames so the `models/catalog.json` URLs resolve - and
 commit the manifest if it changed (a different `ultralytics`/`torch` build can produce
 different digests). The `gh` equivalents are `gh release create models-v1` and
 `gh release upload models-v1 dist/models/*.onnx`.

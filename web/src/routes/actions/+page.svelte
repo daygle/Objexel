@@ -85,7 +85,7 @@
 </section>
 
 <section class="card section"><h2>Templates</h2>
-  <div class="form"><input bind:value={tplName} placeholder="Template name" /><input bind:value={tplSubject} placeholder="Subject (email)" /><textarea bind:value={tplBody} placeholder="Body text — event summary tokens are substituted at send time"></textarea><label class="check"><input type="checkbox" bind:checked={tplHtml} /> HTML body</label><button on:click={createTemplate} disabled={!tplName.trim() || !tplBody.trim()}>Create template</button></div>
+  <div class="form"><input bind:value={tplName} placeholder="Template name" /><input bind:value={tplSubject} placeholder="Subject (email)" /><textarea bind:value={tplBody} placeholder="Body text - event summary tokens are substituted at send time"></textarea><label class="check"><input type="checkbox" bind:checked={tplHtml} /> HTML body</label><button on:click={createTemplate} disabled={!tplName.trim() || !tplBody.trim()}>Create template</button></div>
   {#if templates.length === 0}<p class="muted small">No templates yet. Actions without a template send a default event summary.</p>{:else}{#each templates as template}<div class="line"><div><strong>{template.name}</strong><small class="muted">{template.subject || 'no subject'} · {template.html ? 'HTML' : 'text'}</small></div></div>{/each}{/if}
 </section>
 

@@ -116,7 +116,7 @@
     // Username/Password fields; they are combined into the RTSP URL on save.
     rtspUrl = profile.rtsp_uri;
     credUser = onvifUsername; credPass = onvifPassword;
-    message = 'RTSP filled below — credentials are in the Username/Password fields; review, then Add camera.';
+    message = 'RTSP filled below - credentials are in the Username/Password fields; review, then Add camera.';
   }
 
   onMount(load);
@@ -159,7 +159,7 @@
               <td><input bind:value={editName} /></td>
               <td><input class="wide" bind:value={editRtsp} /></td>
               <td><label class="check"><input type="checkbox" bind:checked={editEnabled} /> Enabled</label></td>
-              <td class="muted">—</td>
+              <td class="muted">-</td>
               <td class="actions"><button on:click={() => saveEdit(camera)}>Save</button><button class="ghost" on:click={cancelEdit}>Cancel</button></td>
             {:else}
               <td><strong>{camera.name}</strong><small>{camera.id.slice(0, 8)}{camera.enabled ? '' : ' · disabled'}</small></td>

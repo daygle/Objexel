@@ -78,7 +78,7 @@
               <td><select bind:value={editModel} disabled>{#each models as m}<option value={m.id}>{m.name}</option>{/each}</select></td>
               <td><input type="number" bind:value={editPriority} min="0" /></td>
               <td><input type="number" bind:value={editThreshold} min="0" max="100" />%</td>
-              <td><input type="number" bind:value={editFps} placeholder="—" min="0" step="0.1" /></td>
+              <td><input type="number" bind:value={editFps} placeholder="-" min="0" step="0.1" /></td>
               <td><label class="check"><input type="checkbox" bind:checked={editEnabled} /> Enabled</label></td>
               <td class="actions"><button on:click={saveEdit}>Save</button><button class="ghost" on:click={cancelEdit}>Cancel</button></td>
             </tr>
@@ -88,7 +88,7 @@
               <td>{models.find((model) => model.id === item.model_id)?.name ?? item.model_id.slice(0,8)}</td>
               <td>{item.priority}</td>
               <td>{Math.round(item.confidence_threshold * 100)}%</td>
-              <td>{item.fps_limit ?? '—'}</td>
+              <td>{item.fps_limit ?? '-'}</td>
               <td><span class="pill">{item.enabled ? 'enabled' : 'paused'}</span></td>
               <td class="actions">
                 <button class="ghost" on:click={() => startEdit(item)}>Edit</button>

@@ -13,7 +13,7 @@ Objexel is a self-hosted, Linux-first AI camera platform for object detection, t
 
 ## Quick start
 
-The recommended deployment is Docker Compose on Debian 13 or Ubuntu 24.04+. Install Docker Engine and the Compose plugin first — see [Install Docker Engine](docs/installation.md#install-docker-engine).
+The recommended deployment is Docker Compose on Debian 13 or Ubuntu 24.04+. Install Docker Engine and the Compose plugin first - see [Install Docker Engine](docs/installation.md#install-docker-engine).
 
 ```sh
 sudo mkdir -p /opt/objexel
@@ -43,7 +43,7 @@ Objexel supports:
 - safe `tar.gz` and `zip` extraction with path traversal rejection
 - benchmark results and per-camera model assignments
 
-The **Models** page ships a built-in catalog of the YOLO11 and YOLO26 families for one-click, checksum-verified downloads. Hosting the ONNX assets is a one-time operator step — exact instructions in [docs/model-hosting-setup.md](docs/model-hosting-setup.md). Catalog downloads register disabled; review, enable, benchmark, and activate from **Models**. See [docs/model-management.md](docs/model-management.md).
+The **Models** page ships a built-in catalog of the YOLO11 and YOLO26 families for one-click, checksum-verified downloads. Hosting the ONNX assets is a one-time operator step - exact instructions in [docs/model-hosting-setup.md](docs/model-hosting-setup.md). Catalog downloads register disabled; review, enable, benchmark, and activate from **Models**. See [docs/model-management.md](docs/model-management.md).
 
 ## Updates
 
