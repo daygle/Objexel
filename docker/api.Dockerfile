@@ -9,7 +9,7 @@ FROM rust:1-trixie AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends cmake g++ git python3 libeigen3-dev && rm -rf /var/lib/apt/lists/*
 RUN git clone --branch v1.16.3 --depth 1 https://github.com/microsoft/onnxruntime.git /tmp/onnxruntime
 WORKDIR /tmp/onnxruntime
-RUN ./build.sh --build_shared_lib --skip_tests --config Release --allow_running_as_root --use_preinstalled_eigen --cmake_extra_defines eigen_SOURCE_PATH=/usr/include/eigen3
+RUN ./build.sh --build_shared_lib --skip_tests --config Release --allow_running_as_root --use_preinstalled_eigen --eigen_path /usr/include/eigen3
 RUN cp build/Linux/Release/libonnxruntime.so* /usr/local/lib/
 WORKDIR /src
 COPY . .
