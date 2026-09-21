@@ -5,7 +5,7 @@ Objexel's detector consumes ONNX, while Ultralytics publishes PyTorch (`.pt`) we
 so the ONNX files that back the built-in catalog are produced here and hosted on a
 GitHub release. Run this whenever you want to refresh to newer upstream weights:
 
-    pip install ultralytics onnx
+    pip install "ultralytics==8.4.157" onnx    # pin for byte-reproducible exports
     python scripts/export_models.py --out dist/models
 
 Then upload every *.onnx in the output directory to the release named by --release-tag
@@ -13,9 +13,13 @@ Then upload every *.onnx in the output directory to the release named by --relea
 models/catalog.json. Deployments pick up the new checksums via the "Refresh catalog"
 button (or OBJEXEL_MODEL_CATALOG_URL at boot).
 
-The output is deterministic for a given ultralytics/opset combination; the printed
-SHA-256 digests are what Objexel verifies after download, so the files you upload must
-be exactly the ones this script produced.
+This script is the source of the ONNX assets: the SHA-256 digests it writes into
+models/catalog.json are exactly what Objexel verifies after download, so the files you
+upload to the release must be the ones this run produced. Because the script rewrites
+models/catalog.json to match its own output, the manifest and the uploaded files stay
+consistent even if a newer ultralytics/torch changes the bytes — just commit the
+regenerated catalog.json. The committed catalog.json in this repo was produced with
+ultralytics 8.4.157 / torch 2.14 / opset 12.
 """
 from __future__ import annotations
 

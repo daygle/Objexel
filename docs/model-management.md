@@ -29,6 +29,13 @@ To activate one-click downloads, create that release once and upload the exporte
 files (their SHA-256 digests must match `models/catalog.json`). Until the assets exist the
 entries appear in the catalog but downloads will fail the fetch.
 
+Produce the files with `scripts/export_models.py`, which writes both the `*.onnx` assets
+and a matching `models/catalog.json`. The committed manifest was generated with
+`ultralytics==8.4.157` / `torch 2.14` / opset 12; using the same versions reproduces the
+exact bytes and digests. If you export with different versions, just commit the
+regenerated `models/catalog.json` — the manifest always matches the files the script
+produced, and deployments reconcile via **Refresh catalog**.
+
 ### Updating models
 
 Model weights are updated upstream over time. To publish a refresh without shipping a new
