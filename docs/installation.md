@@ -4,17 +4,58 @@
 
 - Debian 13 (recommended), Ubuntu 24.04+, or a Proxmox VM
 - 4 CPU cores and 8 GB RAM minimum; add RAM for more cameras/models
-- PostgreSQL 16, FFmpeg, and Docker Engine with Compose v2
+- Docker Engine with the Compose v2 plugin (installation steps below) for the recommended deployment
 - SSD storage for the database and model files; separate storage for recordings
 
-## Docker Compose (recommended)
+With the Docker Compose deployment, PostgreSQL and FFmpeg run inside containers, so
+you do not install them on the host. They are only required for a native install
+(see [Native Debian](#native-debian)).
+
+## Install Docker Engine
+
+Use Docker's official apt repository (recommended for production). The commands below
+are for Debian; on Ubuntu, replace `debian` with `ubuntu` in the GPG key and
+repository URLs.
 
 ```sh
-sudo apt update
-sudo apt install -y ca-certificates curl git openssl
-curl -fsSL https://get.docker.com | sudo sh
+# 1. Remove any distro-provided packages that conflict with Docker's
+for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
+  sudo apt-get remove -y "$pkg" 2>/dev/null || true
+done
+
+# 2. Install prerequisites and add Docker's official GPG key
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl git openssl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# 3. Add the Docker apt repository for this release
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "${VERSION_CODENAME}") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+
+# 4. Install Docker Engine, the CLI, containerd, and the Buildx + Compose plugins
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# 5. Allow your user to run Docker without sudo (log out and back in to apply)
 sudo usermod -aG docker "$USER"
-mkdir -p /opt/objexel
+
+# 6. Verify the installation
+docker --version
+docker compose version
+```
+
+For a quick, non-production host you can instead use Docker's convenience script:
+`curl -fsSL https://get.docker.com | sudo sh`.
+
+## Deploy Objexel with Docker Compose (recommended)
+
+```sh
+sudo mkdir -p /opt/objexel
+sudo chown -R "$USER":"$USER" /opt/objexel
 cd /opt/objexel
 if [ -d .git ]; then
   git pull --autostash
@@ -22,7 +63,6 @@ else
   git clone https://github.com/daygle/Objexel.git .
 fi
 mkdir -p config models recordings clips snapshots backups
-sudo chown -R "$USER":"$USER" /opt/objexel
 printf 'POSTGRES_PASSWORD=%s\nOBJEXEL_COOKIE_SECURE=1\n' "$(openssl rand -hex 24)" > .env
 docker compose up -d --build
 curl -fsS http://localhost:8080/liveness
