@@ -105,8 +105,8 @@ impl RuntimeMetrics {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, ready, liveness, readiness, metrics, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, list_model_catalog, import_model_catalog, refresh_model_catalog, download_model, get_model_download, get_model, create_model, set_model_enabled, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, validate_provider, list_templates, create_template, test_notification, global_search, search_events, search_observations, search_tracks, search_recordings, search_detections, search_behaviours, list_behaviours, get_behaviour, list_identities, get_identity, update_identity, identity_history, intelligence_summary, list_anomalies, list_fusion, list_model_assignments, create_model_assignment, analytics_summary, analytics_cameras, analytics_zones, analytics_models, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
-    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, ModelCatalogEntry, ModelDownload, UpdateInfo, UpdateModelEnabled, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Recording, Clip, Snapshot, SearchResult, AnalyticsSummary, Behaviour, Identity, IdentityObservation, IdentityStatistics, UpdateIdentity, IdentityScore, BehaviourScore, AnomalyEvent, IntelligenceSummary, ModelAssignment, CreateModelAssignment, FusionResult, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
+    paths(health, ready, liveness, readiness, metrics, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, list_model_catalog, import_model_catalog, refresh_model_catalog, download_model, get_model_download, get_model, create_model, set_model_enabled, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, validate_provider, list_templates, create_template, test_notification, global_search, search_events, search_observations, search_tracks, search_recordings, search_detections, search_behaviours, list_behaviours, get_behaviour, list_identities, get_identity, update_identity, identity_history, intelligence_summary, list_anomalies, list_fusion, list_model_assignments, create_model_assignment, update_model_assignment, delete_model_assignment, analytics_summary, analytics_cameras, analytics_zones, analytics_models, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
+    components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, ModelCatalogEntry, ModelDownload, UpdateInfo, UpdateModelEnabled, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Recording, Clip, Snapshot, SearchResult, AnalyticsSummary, Behaviour, Identity, IdentityObservation, IdentityStatistics, UpdateIdentity, IdentityScore, BehaviourScore, AnomalyEvent, IntelligenceSummary, ModelAssignment, CreateModelAssignment, UpdateAssignmentRequest, FusionResult, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
     tags((name = "cameras", description = "Camera management and RTSP ingestion"))
 )]
 pub struct ApiDoc;
@@ -182,6 +182,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/anomalies", get(list_anomalies))
         .route("/api/fusion", get(list_fusion))
         .route("/api/model-assignments", get(list_model_assignments).post(create_model_assignment))
+        .route("/api/model-assignments/{id}", axum::routing::put(update_model_assignment).delete(delete_model_assignment))
         .route("/api/analytics", get(analytics_summary))
         .route("/api/analytics/cameras", get(analytics_cameras))
         .route("/api/analytics/zones", get(analytics_zones))
@@ -860,6 +861,20 @@ async fn create_model_assignment(State(state): State<Arc<AppState>>, Json(input)
     if database(&state)?.get_camera(input.camera_id).await.map_err(internal_error)?.is_none() { return Err(not_found("camera not found")); }
     if database(&state)?.get_model(input.model_id).await.map_err(internal_error)?.is_none() { return Err(not_found("model not found")); }
     database(&state)?.create_model_assignment(input).await.map(|item| (StatusCode::CREATED, Json(item))).map_err(internal_error)
+}
+
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+struct UpdateAssignmentRequest { priority: i32, confidence_threshold: f32, fps_limit: Option<f32>, enabled: bool }
+
+#[utoipa::path(put, path = "/api/model-assignments/{id}", tag = "fusion", params(("id" = Uuid, Path)), request_body = UpdateAssignmentRequest, responses((status = 200, body = ModelAssignment), (status = 400), (status = 404), (status = 503)))]
+async fn update_model_assignment(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>, Json(input): Json<UpdateAssignmentRequest>) -> Result<Json<ModelAssignment>, ErrorResponse> {
+    if !(0.0..=1.0).contains(&input.confidence_threshold) || input.fps_limit.is_some_and(|value| value <= 0.0) { return Err(bad_request("confidence threshold must be 0..1 and fps_limit must be positive")); }
+    database(&state)?.update_model_assignment(id, input.priority, input.confidence_threshold, input.fps_limit, input.enabled).await.map_err(internal_error)?.map(Json).ok_or_else(|| not_found("assignment not found"))
+}
+
+#[utoipa::path(delete, path = "/api/model-assignments/{id}", tag = "fusion", params(("id" = Uuid, Path)), responses((status = 204), (status = 404), (status = 503)))]
+async fn delete_model_assignment(State(state): State<Arc<AppState>>, Path(id): Path<Uuid>) -> Result<StatusCode, ErrorResponse> {
+    if database(&state)?.delete_model_assignment(id).await.map_err(internal_error)? { Ok(StatusCode::NO_CONTENT) } else { Err(not_found("assignment not found")) }
 }
 
 #[derive(Debug, serde::Deserialize)]

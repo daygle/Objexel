@@ -273,6 +273,19 @@ impl Database {
         self.list_model_assignments(Some(input.camera_id)).await?.into_iter().find(|item| item.model_id == input.model_id).context("assignment was not returned after insert")
     }
 
+    pub async fn update_model_assignment(&self, id: Uuid, priority: i32, confidence_threshold: f32, fps_limit: Option<f32>, enabled: bool) -> anyhow::Result<Option<ModelAssignment>> {
+        let result = sqlx::query("UPDATE model_assignments SET priority=$2, confidence_threshold=$3, fps_limit=$4, enabled=$5 WHERE id=$1")
+            .bind(id).bind(priority).bind(confidence_threshold.clamp(0.0, 1.0)).bind(fps_limit).bind(enabled).execute(&self.pool).await?;
+        if result.rows_affected() == 0 { return Ok(None); }
+        let row = sqlx::query("SELECT id,camera_id,model_id,priority,confidence_threshold,fps_limit,enabled FROM model_assignments WHERE id=$1").bind(id).fetch_one(&self.pool).await?;
+        Ok(Some(model_assignment_from_row(row)?))
+    }
+
+    pub async fn delete_model_assignment(&self, id: Uuid) -> anyhow::Result<bool> {
+        let result = sqlx::query("DELETE FROM model_assignments WHERE id=$1").bind(id).execute(&self.pool).await?;
+        Ok(result.rows_affected() > 0)
+    }
+
     pub async fn list_fusion_results(&self, camera_id: Option<Uuid>, limit: i64) -> anyhow::Result<Vec<FusionResult>> {
         let rows = match camera_id {
             Some(id) => sqlx::query("SELECT id,camera_id,detection_id,source_model_ids,fused_confidence,created_at FROM fusion_results WHERE camera_id=$1 ORDER BY created_at DESC LIMIT $2").bind(id).bind(limit.clamp(1,500)).fetch_all(&self.pool).await?,
