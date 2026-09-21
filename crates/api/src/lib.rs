@@ -105,7 +105,7 @@ impl RuntimeMetrics {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(health, ready, liveness, readiness, metrics, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, list_model_catalog, import_model_catalog, download_model, get_model_download, get_model, create_model, set_model_enabled, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, validate_provider, list_templates, create_template, test_notification, global_search, search_events, search_observations, search_tracks, search_recordings, search_detections, search_behaviours, list_behaviours, get_behaviour, list_identities, get_identity, update_identity, identity_history, intelligence_summary, list_anomalies, list_fusion, list_model_assignments, create_model_assignment, analytics_summary, analytics_cameras, analytics_zones, analytics_models, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
+    paths(health, ready, liveness, readiness, metrics, list_cameras, create_camera, get_camera, update_camera, delete_camera, test_camera, snapshot_camera, camera_status, assign_camera_model, list_models, list_model_catalog, import_model_catalog, refresh_model_catalog, download_model, get_model_download, get_model, create_model, set_model_enabled, delete_model, reload_models, activate_model, benchmark_model, list_benchmarks, list_actions, get_action, create_action, update_action, delete_action, list_executions, list_notifications, list_providers, create_provider, update_provider, validate_provider, list_templates, create_template, test_notification, global_search, search_events, search_observations, search_tracks, search_recordings, search_detections, search_behaviours, list_behaviours, get_behaviour, list_identities, get_identity, update_identity, identity_history, intelligence_summary, list_anomalies, list_fusion, list_model_assignments, create_model_assignment, analytics_summary, analytics_cameras, analytics_zones, analytics_models, list_recordings, get_recording, list_clips, get_clip, clip_media, download_clip, list_snapshots, get_snapshot, snapshot_media, list_detections, get_detection, list_tracks, get_track, list_observations, get_observation, list_zones, create_zone, get_zone, update_zone, delete_zone, list_zone_events, list_rules, get_rule, create_rule, update_rule, delete_rule, list_events, get_event),
     components(schemas(Camera, CreateCamera, CreateModel, UpdateCamera, CameraStatus, CameraTestResult, StreamMetadata, HealthResponse, Model, ModelCatalogEntry, ModelDownload, UpdateInfo, UpdateModelEnabled, BenchmarkResult, Action, ActionExecution, CreateAction, UpdateAction, Notification, NotificationProvider, NotificationTemplate, CreateNotificationProvider, UpdateNotificationProvider, CreateNotificationTemplate, Recording, Clip, Snapshot, SearchResult, AnalyticsSummary, Behaviour, Identity, IdentityObservation, IdentityStatistics, UpdateIdentity, IdentityScore, BehaviourScore, AnomalyEvent, IntelligenceSummary, ModelAssignment, CreateModelAssignment, FusionResult, Detection, Track, Observation, Zone, CreateZone, UpdateZone, ZoneEvent, Rule, CreateRule, UpdateRule, Event)),
     tags((name = "cameras", description = "Camera management and RTSP ingestion"))
 )]
@@ -147,6 +147,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/models", get(list_models).post(create_model))
         .route("/api/models/catalog", get(list_model_catalog))
         .route("/api/models/catalog/import", post(import_model_catalog))
+        .route("/api/models/catalog/refresh", post(refresh_model_catalog))
         .route("/api/models/catalog/{id}/download", axum::routing::post(download_model))
         .route("/api/models/downloads/{id}", get(get_model_download))
         .route("/api/updates", get(update_info))
@@ -599,6 +600,24 @@ async fn import_model_catalog(State(state): State<Arc<AppState>>, Json(entries):
     Ok(Json(json!({ "imported": entries.len() })))
 }
 
+#[utoipa::path(post, path = "/api/models/catalog/refresh", tag = "models", responses((status = 200), (status = 400), (status = 502), (status = 503)))]
+async fn refresh_model_catalog(State(state): State<Arc<AppState>>) -> Result<Json<Value>, ErrorResponse> {
+    let database = database(&state)?;
+    let url = std::env::var("OBJEXEL_MODEL_CATALOG_URL").unwrap_or_else(|_| DEFAULT_CATALOG_URL.to_string());
+    let response = reqwest::Client::new().get(&url).send().await.map_err(|error| bad_gateway(format!("could not fetch catalog: {error}")))?;
+    if !response.status().is_success() { return Err(bad_gateway(format!("catalog source returned status {}", response.status()))); }
+    let body = response.text().await.map_err(|error| bad_gateway(format!("could not read catalog: {error}")))?;
+    let entries: Vec<ModelCatalogEntry> = serde_json::from_str(&body).map_err(|error| bad_request(&format!("catalog is not valid JSON: {error}")))?;
+    if entries.is_empty() || entries.len() > 100 { return Err(bad_request("catalog must contain between 1 and 100 entries")); }
+    let mut ids = HashSet::new();
+    for entry in &entries {
+        validate_model_catalog_entry(entry).map_err(|error| bad_request(&error))?;
+        if !ids.insert(&entry.id) { return Err(bad_request("catalog contains duplicate ids")); }
+    }
+    for entry in &entries { database.upsert_model_catalog(entry).await.map_err(internal_error)?; }
+    Ok(Json(json!({ "imported": entries.len(), "source": url })))
+}
+
 fn coco80_labels() -> Vec<String> {
     [
         "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
@@ -610,6 +629,22 @@ fn coco80_labels() -> Vec<String> {
         "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven",
         "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
     ].into_iter().map(str::to_owned).collect()
+}
+
+/// Default location of the hosted catalog manifest used by the "Refresh catalog"
+/// action. Editing `models/catalog.json` on the default branch (and uploading any
+/// new ONNX assets to the matching release) publishes model updates to every
+/// deployment without shipping a new Objexel build. Override with
+/// `OBJEXEL_MODEL_CATALOG_URL` to track a different manifest.
+pub const DEFAULT_CATALOG_URL: &str = "https://raw.githubusercontent.com/daygle/Objexel/main/models/catalog.json";
+
+/// The catalog shipped with Objexel, embedded at build time from `models/catalog.json`.
+/// Seeded on startup so the Models page offers one-click, checksum-verified YOLO11 and
+/// YOLO26 downloads without any configuration. `models/catalog.json` is the single source
+/// of truth: the same file is served over HTTP for the runtime refresh path.
+pub fn default_model_catalog() -> Vec<ModelCatalogEntry> {
+    const EMBEDDED: &str = include_str!("../../../models/catalog.json");
+    serde_json::from_str(EMBEDDED).unwrap_or_default()
 }
 
 pub fn validate_model_catalog_entry(entry: &ModelCatalogEntry) -> Result<(), String> {

@@ -119,6 +119,14 @@ impl CameraRuntime for LiveCameraRuntime {
     }
 }
 
+/// Fetch and parse a hosted model catalog manifest (used for the optional
+/// boot-time refresh when `OBJEXEL_MODEL_CATALOG_URL` is set).
+async fn fetch_remote_catalog(url: &str) -> anyhow::Result<Vec<objexel_common::ModelCatalogEntry>> {
+    let response = reqwest::Client::new().get(url).send().await?.error_for_status()?;
+    let body = response.text().await?;
+    Ok(serde_json::from_str::<Vec<objexel_common::ModelCatalogEntry>>(&body)?)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter(env::var("RUST_LOG").unwrap_or_else(|_| "info".into())).init();
@@ -137,6 +145,18 @@ async fn main() -> anyhow::Result<()> {
                 tracing::error!(%error, "database migration failed");
                 return Err(error);
             }
+            // Seed the built-in catalog so the Models page is populated with one-click,
+            // checksum-verified YOLO11/YOLO26 downloads out of the box. Entries are keyed
+            // by a stable id, so this upsert is idempotent and any operator edits made
+            // through the API are refreshed to the shipped definition on restart. Set
+            // OBJEXEL_DISABLE_DEFAULT_CATALOG=1 to skip seeding.
+            if !matches!(env::var("OBJEXEL_DISABLE_DEFAULT_CATALOG").as_deref(), Ok("1") | Ok("true")) {
+                for entry in objexel_api::default_model_catalog() {
+                    if let Err(error) = database.upsert_model_catalog(&entry).await {
+                        tracing::warn!(catalog_id = %entry.id, %error, "could not seed default model catalog entry");
+                    }
+                }
+            }
             if let Ok(path) = env::var("OBJEXEL_MODEL_CATALOG") {
                 match tokio::fs::read_to_string(&path).await {
                     Ok(contents) => match serde_json::from_str::<Vec<objexel_common::ModelCatalogEntry>>(&contents) {
@@ -154,6 +174,25 @@ async fn main() -> anyhow::Result<()> {
                         Err(error) => tracing::warn!(%error, path = %path, "could not parse model catalog file"),
                     },
                     Err(error) => tracing::warn!(%error, path = %path, "could not read model catalog file"),
+                }
+            }
+            // When a hosted manifest URL is configured, pull the latest catalog at boot so
+            // deployments track new model versions without a rebuild. Failures are
+            // non-fatal: the embedded default catalog remains available.
+            if let Ok(url) = env::var("OBJEXEL_MODEL_CATALOG_URL") {
+                match fetch_remote_catalog(&url).await {
+                    Ok(entries) => {
+                        for entry in entries {
+                            if let Err(error) = validate_model_catalog_entry(&entry) {
+                                tracing::warn!(catalog_id = %entry.id, %error, "invalid remote model catalog entry");
+                                continue;
+                            }
+                            if let Err(error) = database.upsert_model_catalog(&entry).await {
+                                tracing::warn!(catalog_id = %entry.id, %error, "could not import remote model catalog entry");
+                            }
+                        }
+                    }
+                    Err(error) => tracing::warn!(%error, %url, "could not refresh model catalog from URL"),
                 }
             }
             Some(database)

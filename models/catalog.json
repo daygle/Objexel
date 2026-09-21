@@ -1,0 +1,112 @@
+[
+  {
+    "id": "yolo11n-coco",
+    "name": "YOLO11n",
+    "version": "coco",
+    "model_type": "yolo-coco",
+    "download_url": "https://github.com/daygle/Objexel/releases/download/models-v1/yolo11n.onnx",
+    "sha256": "d9ddc376376c73225a03af484a46accdd4f0986187d80a0fa355fc9211e5a2cb",
+    "input_width": 640,
+    "input_height": 640,
+    "class_list": []
+  },
+  {
+    "id": "yolo11s-coco",
+    "name": "YOLO11s",
+    "version": "coco",
+    "model_type": "yolo-coco",
+    "download_url": "https://github.com/daygle/Objexel/releases/download/models-v1/yolo11s.onnx",
+    "sha256": "b0331447344ac468e78680bd9669fad63d429733c98142d292fa2d151763630e",
+    "input_width": 640,
+    "input_height": 640,
+    "class_list": []
+  },
+  {
+    "id": "yolo11m-coco",
+    "name": "YOLO11m",
+    "version": "coco",
+    "model_type": "yolo-coco",
+    "download_url": "https://github.com/daygle/Objexel/releases/download/models-v1/yolo11m.onnx",
+    "sha256": "9cb4e001e9f4da0b3da25c13c21fafb3bfa1b26ff3c6b26daaff1608c188e25e",
+    "input_width": 640,
+    "input_height": 640,
+    "class_list": []
+  },
+  {
+    "id": "yolo11l-coco",
+    "name": "YOLO11l",
+    "version": "coco",
+    "model_type": "yolo-coco",
+    "download_url": "https://github.com/daygle/Objexel/releases/download/models-v1/yolo11l.onnx",
+    "sha256": "2896728fbd8ff92585ac38b3b1aaef92b2c3f87f3c5ca60641ac84c70241c6a8",
+    "input_width": 640,
+    "input_height": 640,
+    "class_list": []
+  },
+  {
+    "id": "yolo11x-coco",
+    "name": "YOLO11x",
+    "version": "coco",
+    "model_type": "yolo-coco",
+    "download_url": "https://github.com/daygle/Objexel/releases/download/models-v1/yolo11x.onnx",
+    "sha256": "d6aa5731b6d03faa7251a350abfeccf4a3c33c7878fef2d49ab32ef4ece81af2",
+    "input_width": 640,
+    "input_height": 640,
+    "class_list": []
+  },
+  {
+    "id": "yolo26n-coco",
+    "name": "YOLO26n",
+    "version": "coco",
+    "model_type": "yolo-coco",
+    "download_url": "https://github.com/daygle/Objexel/releases/download/models-v1/yolo26n.onnx",
+    "sha256": "ed3936815e004e0a08df1dfbabea97f3c83d2dcb9b217c786869887ee8d5210c",
+    "input_width": 640,
+    "input_height": 640,
+    "class_list": []
+  },
+  {
+    "id": "yolo26s-coco",
+    "name": "YOLO26s",
+    "version": "coco",
+    "model_type": "yolo-coco",
+    "download_url": "https://github.com/daygle/Objexel/releases/download/models-v1/yolo26s.onnx",
+    "sha256": "2bc17c6dfd127f8610323504fd914af76b5832bf17642502ab471a3120f56b02",
+    "input_width": 640,
+    "input_height": 640,
+    "class_list": []
+  },
+  {
+    "id": "yolo26m-coco",
+    "name": "YOLO26m",
+    "version": "coco",
+    "model_type": "yolo-coco",
+    "download_url": "https://github.com/daygle/Objexel/releases/download/models-v1/yolo26m.onnx",
+    "sha256": "73f9e91e6bba065fdf1380b856393abb6ff8dab45e672c1e5f6cd847ff02cf6b",
+    "input_width": 640,
+    "input_height": 640,
+    "class_list": []
+  },
+  {
+    "id": "yolo26l-coco",
+    "name": "YOLO26l",
+    "version": "coco",
+    "model_type": "yolo-coco",
+    "download_url": "https://github.com/daygle/Objexel/releases/download/models-v1/yolo26l.onnx",
+    "sha256": "e0064cf77c00945bef22a7e5a39405bfcb23b7cec965ffa36f39b57cfb80fb55",
+    "input_width": 640,
+    "input_height": 640,
+    "class_list": []
+  },
+  {
+    "id": "yolo26x-coco",
+    "name": "YOLO26x",
+    "version": "coco",
+    "model_type": "yolo-coco",
+    "download_url": "https://github.com/daygle/Objexel/releases/download/models-v1/yolo26x.onnx",
+    "sha256": "f35c46bf75f86f7f1d4952501b9a13c87d44e919bfce0ef9bcb4784ec254820c",
+    "input_width": 640,
+    "input_height": 640,
+    "class_list": []
+  }
+]
