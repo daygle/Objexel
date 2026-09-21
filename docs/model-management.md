@@ -27,7 +27,8 @@ https://github.com/daygle/Objexel/releases/download/models-v1/<model>.onnx
 
 To activate one-click downloads, create that release once and upload the exported ONNX
 files (their SHA-256 digests must match `models/catalog.json`). Until the assets exist the
-entries appear in the catalog but downloads will fail the fetch.
+entries appear in the catalog but downloads will fail the fetch. **Exact copy-paste steps
+are in [model-hosting-setup.md](model-hosting-setup.md).**
 
 Produce the files with `scripts/export_models.py`, which writes both the `*.onnx` assets
 and a matching `models/catalog.json`. The committed manifest was generated with
