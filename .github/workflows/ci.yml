@@ -63,6 +63,7 @@ jobs:
           file: docker/api.Dockerfile
           push: false
           tags: objexel/api:ci
+          build-args: BUILD_ORT_FROM_SOURCE=false
           # Scope the cache per ref so a PR run and the main run never collide on the
           # same reservation ("failed to reserve cache"), while still warming from main.
           # ignore-error keeps a transient cache hiccup from failing an otherwise good build.

@@ -101,6 +101,7 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: BUILD_ORT_FROM_SOURCE=false
           cache-from: |
             type=gha,scope=docker-release
             type=gha,scope=docker-main
