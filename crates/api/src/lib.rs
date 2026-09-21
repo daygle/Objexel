@@ -220,6 +220,16 @@ async fn metrics(State(state): State<Arc<AppState>>) -> Json<Value> {
         value["recent_detections"] = json!(detections.len());
         value["database"] = json!("ok");
     } else { value["database"] = json!("not_configured"); }
+    if let Some(pipeline) = &state.pipeline {
+        value["pipeline_cameras"] = json!(pipeline.metrics_snapshot().await.into_iter().map(|metrics| json!({
+            "camera_id": metrics.camera_id,
+            "frames_processed": metrics.frames_processed,
+            "frames_in_flight": metrics.frames_in_flight,
+            "processing_errors": metrics.processing_errors,
+            "total_processing_ms": metrics.total_processing_ms,
+            "last_processing_ms": metrics.last_processing_ms,
+        })).collect::<Vec<_>>());
+    }
     Json(value)
 }
 

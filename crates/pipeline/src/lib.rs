@@ -11,7 +11,11 @@ use objexel_recorder::Recorder;
 use objexel_rules::{ObservationContext, RuleEngine};
 use objexel_tracker::Tracker;
 use objexel_zones::ZoneEvaluator;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{atomic::{AtomicU64, Ordering}, Arc},
+    time::Instant,
+};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -27,11 +31,42 @@ pub struct ObservationPipeline {
     recorder: Recorder,
     behaviour: BehaviourAnalyzer,
     fusion: FusionEngine,
+    metrics: Arc<tokio::sync::RwLock<HashMap<Uuid, Arc<CameraMetrics>>>>,
+}
+
+struct CameraMetrics {
+    frames_processed: AtomicU64,
+    frames_in_flight: AtomicU64,
+    processing_errors: AtomicU64,
+    total_processing_ms: AtomicU64,
+    last_processing_ms: AtomicU64,
+}
+
+impl Default for CameraMetrics {
+    fn default() -> Self {
+        Self {
+            frames_processed: AtomicU64::new(0),
+            frames_in_flight: AtomicU64::new(0),
+            processing_errors: AtomicU64::new(0),
+            total_processing_ms: AtomicU64::new(0),
+            last_processing_ms: AtomicU64::new(0),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CameraMetricsSnapshot {
+    pub camera_id: Uuid,
+    pub frames_processed: u64,
+    pub frames_in_flight: u64,
+    pub processing_errors: u64,
+    pub total_processing_ms: u64,
+    pub last_processing_ms: u64,
 }
 
 impl ObservationPipeline {
     pub fn new(database: Database, recorder: Recorder) -> Self {
-        Self { models: ModelManager::default(), trackers: Arc::new(tokio::sync::RwLock::new(HashMap::new())), zones: Arc::new(tokio::sync::RwLock::new(HashMap::new())), rules: Arc::new(Mutex::new(RuleEngine::default())), actions: ActionDispatcher::new(), observations: ObservationEngine::default(), database, recorder, behaviour: BehaviourAnalyzer::default(), fusion: FusionEngine::default() }
+        Self { models: ModelManager::default(), trackers: Arc::new(tokio::sync::RwLock::new(HashMap::new())), zones: Arc::new(tokio::sync::RwLock::new(HashMap::new())), rules: Arc::new(Mutex::new(RuleEngine::default())), actions: ActionDispatcher::new(), observations: ObservationEngine::default(), database, recorder, behaviour: BehaviourAnalyzer::default(), fusion: FusionEngine::default(), metrics: Arc::new(tokio::sync::RwLock::new(HashMap::new())) }
     }
 
     /// Get or create a per-camera Tracker instance.
@@ -54,7 +89,44 @@ impl ObservationPipeline {
         write.entry(camera_id).or_insert_with(|| Arc::new(Mutex::new(ZoneEvaluator::default()))).clone()
     }
 
+    async fn camera_metrics(&self, camera_id: Uuid) -> Arc<CameraMetrics> {
+        {
+            let read = self.metrics.read().await;
+            if let Some(metrics) = read.get(&camera_id) { return metrics.clone(); }
+        }
+        let mut write = self.metrics.write().await;
+        write.entry(camera_id).or_insert_with(|| Arc::new(CameraMetrics::default())).clone()
+    }
+
+    pub async fn metrics_snapshot(&self) -> Vec<CameraMetricsSnapshot> {
+        let read = self.metrics.read().await;
+        read.iter().map(|(camera_id, metrics)| CameraMetricsSnapshot {
+            camera_id: *camera_id,
+            frames_processed: metrics.frames_processed.load(Ordering::Relaxed),
+            frames_in_flight: metrics.frames_in_flight.load(Ordering::Relaxed),
+            processing_errors: metrics.processing_errors.load(Ordering::Relaxed),
+            total_processing_ms: metrics.total_processing_ms.load(Ordering::Relaxed),
+            last_processing_ms: metrics.last_processing_ms.load(Ordering::Relaxed),
+        }).collect()
+    }
+
     pub async fn process_frame(&self, frame: FrameTensor) -> Result<PipelineResult> {
+        let metrics = self.camera_metrics(frame.camera_id).await;
+        metrics.frames_in_flight.fetch_add(1, Ordering::Relaxed);
+        let started = Instant::now();
+        let result = self.process_frame_inner(frame).await;
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        metrics.frames_in_flight.fetch_sub(1, Ordering::Relaxed);
+        metrics.last_processing_ms.store(elapsed_ms, Ordering::Relaxed);
+        metrics.total_processing_ms.fetch_add(elapsed_ms, Ordering::Relaxed);
+        match &result {
+            Ok(_) => { metrics.frames_processed.fetch_add(1, Ordering::Relaxed); }
+            Err(_) => { metrics.processing_errors.fetch_add(1, Ordering::Relaxed); }
+        }
+        result
+    }
+
+    async fn process_frame_inner(&self, frame: FrameTensor) -> Result<PipelineResult> {
         let camera_id = frame.camera_id;
         let assignments = self.database.list_model_assignments(Some(camera_id)).await?;
         let mut raw_detections = Vec::new();
