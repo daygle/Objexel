@@ -19,6 +19,19 @@
   let rtspUrl = '';
   let enabled = true;
   let saving = false;
+  let credUser = ''; let credPass = '';
+
+  function buildRtsp(url: string, user: string, pass: string): string {
+    const trimmed = url.trim();
+    if (user && !trimmed.includes('@')) {
+      return trimmed.replace(/^(rtsps?:\/\/)/i, `$1${encodeURIComponent(user)}:${encodeURIComponent(pass)}@`);
+    }
+    return trimmed;
+  }
+  // Mask the password portion of an rtsp URL for display: rtsp://user:••••@host/...
+  function maskRtsp(url: string): string {
+    return url.replace(/(rtsps?:\/\/[^:/@\s]+:)[^@/\s]+(@)/i, '$1••••$2');
+  }
 
   // Inline edit state
   let editingId: string | null = null;
@@ -35,9 +48,9 @@
   async function create() {
     if (!name.trim() || !rtspUrl.trim()) { message = 'Name and RTSP URL are required'; return; }
     saving = true;
-    const response = await api('/api/cameras', { method: 'POST', json: { name: name.trim(), rtsp_url: rtspUrl.trim(), enabled } });
+    const response = await api('/api/cameras', { method: 'POST', json: { name: name.trim(), rtsp_url: buildRtsp(rtspUrl, credUser, credPass), enabled } });
     message = response.ok ? `Added ${name.trim()}` : await apiError(response);
-    if (response.ok) { name = ''; rtspUrl = ''; enabled = true; await load(); }
+    if (response.ok) { name = ''; rtspUrl = ''; credUser = ''; credPass = ''; enabled = true; await load(); }
     saving = false;
   }
 
@@ -97,6 +110,15 @@
     if (response.ok) await load();
   }
 
+  function useRtsp(profile: OnvifProfile) {
+    if (!profile.rtsp_uri) return;
+    // Keep the URL credential-free and carry the ONVIF credentials in the masked
+    // Username/Password fields; they are combined into the RTSP URL on save.
+    rtspUrl = profile.rtsp_uri;
+    credUser = onvifUsername; credPass = onvifPassword;
+    message = 'RTSP filled below — credentials are in the Username/Password fields; review, then Add camera.';
+  }
+
   onMount(load);
 </script>
 
@@ -110,13 +132,15 @@
   <div class="row"><div><strong>ONVIF discovery</strong><p class="muted">Searches the local network. Discovery may not cross Docker, VLAN, or firewall boundaries.</p></div><button class="ghost" on:click={discoverOnvif} disabled={discovering}>{discovering ? 'Discovering…' : 'Discover ONVIF cameras'}</button></div>
   <div class="onvif-credentials"><input bind:value={onvifUsername} placeholder="ONVIF username" /><input type="password" bind:value={onvifPassword} placeholder="ONVIF password" /></div>
   {#if onvifDevices.length}<div class="discovered">{#each onvifDevices as device}<div class="discovered-row"><span><strong>{device.scopes.find((scope) => scope.includes('/name/'))?.split('/name/')[1] ?? 'ONVIF device'}</strong><small>{device.xaddrs[0] ?? device.endpoint}</small></span><button class="ghost" on:click={() => loadOnvifProfiles(device.xaddrs[0])} disabled={!device.xaddrs[0] || loadingProfiles}>{selectedService === device.xaddrs[0] && loadingProfiles ? 'Loading…' : 'Get profiles'}</button></div>{/each}</div>{/if}
-  {#if onvifProfiles.length}<div class="profiles-list">{#each onvifProfiles as profile}<div class="discovered-row"><span><strong>{profile.name ?? profile.token}</strong><small>{profile.width ?? '?'} × {profile.height ?? '?'}{profile.rtsp_uri ? ` · ${profile.rtsp_uri}` : ' · no RTSP URI'}</small></span><button class="ghost" on:click={() => { if (profile.rtsp_uri) rtspUrl = profile.rtsp_uri; }}>Use RTSP</button></div>{/each}</div>{/if}
+  {#if onvifProfiles.length}<div class="profiles-list">{#each onvifProfiles as profile}<div class="discovered-row"><span><strong>{profile.name ?? profile.token}</strong><small>{profile.width ?? '?'} × {profile.height ?? '?'}{profile.rtsp_uri ? ` · ${profile.rtsp_uri}` : ' · no RTSP URI'}</small></span><button class="ghost" on:click={() => useRtsp(profile)}>Use RTSP</button></div>{/each}</div>{/if}
 </section>
 
 <section class="card form">
   <div class="form-row">
     <input bind:value={name} placeholder="Camera name" />
-    <input bind:value={rtspUrl} placeholder="rtsp://user:pass@host:554/stream" />
+    <input bind:value={rtspUrl} placeholder="rtsp://host:554/stream" />
+    <input bind:value={credUser} placeholder="Username (optional)" autocomplete="off" />
+    <input type="password" bind:value={credPass} placeholder="Password (optional)" autocomplete="new-password" />
     <label class="check"><input type="checkbox" bind:checked={enabled} /> Enabled</label>
     <button on:click={create} disabled={saving || !name.trim() || !rtspUrl.trim()}>{saving ? 'Adding…' : 'Add camera'}</button>
   </div>
@@ -139,7 +163,7 @@
               <td class="actions"><button on:click={() => saveEdit(camera)}>Save</button><button class="ghost" on:click={cancelEdit}>Cancel</button></td>
             {:else}
               <td><strong>{camera.name}</strong><small>{camera.id.slice(0, 8)}{camera.enabled ? '' : ' · disabled'}</small></td>
-              <td class="muted">{camera.rtsp_url}</td>
+              <td class="muted">{maskRtsp(camera.rtsp_url)}</td>
               <td><span class:online={camera.status === 'online'} class="status">{camera.status}</span></td>
               <td>
                 <select value={camera.active_model_id ?? ''} on:change={(event) => assign(camera, (event.currentTarget as HTMLSelectElement).value)}>
