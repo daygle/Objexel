@@ -23,62 +23,66 @@
 <nav>
   <a class="brand" href="/observations">OBJEXEL <span>EDGE INTELLIGENCE</span></a>
   <div class="nav-links">
-    <a href="/observations">Observations</a>
-    <a href="/cameras">Cameras</a>
+    {#if signedIn}
+      <a href="/observations">Observations</a>
+      <a href="/cameras">Cameras</a>
 
-    <div class="nav-item">
-      <button class="nav-btn" on:click|stopPropagation={() => toggleDropdown('detection')}>Detection</button>
-      {#if openDropdown === 'detection'}
-        <div class="dropdown">
-          <a href="/detections" on:click={closeDropdowns}>Detections</a>
-          <a href="/tracks" on:click={closeDropdowns}>Tracks</a>
-          <a href="/behaviours" on:click={closeDropdowns}>Behaviours</a>
-          <a href="/identities" on:click={closeDropdowns}>Identities</a>
-        </div>
-      {/if}
-    </div>
+      <div class="nav-item">
+        <button class="nav-btn" on:click|stopPropagation={() => toggleDropdown('detection')}>Detection</button>
+        {#if openDropdown === 'detection'}
+          <div class="dropdown">
+            <a href="/detections" on:click={closeDropdowns}>Detections</a>
+            <a href="/tracks" on:click={closeDropdowns}>Tracks</a>
+            <a href="/behaviours" on:click={closeDropdowns}>Behaviours</a>
+            <a href="/identities" on:click={closeDropdowns}>Identities</a>
+          </div>
+        {/if}
+      </div>
 
-    <div class="nav-item">
-      <button class="nav-btn" on:click|stopPropagation={() => toggleDropdown('intelligence')}>Intelligence</button>
-      {#if openDropdown === 'intelligence'}
-        <div class="dropdown">
-          <a href="/analytics" on:click={closeDropdowns}>Analytics</a>
-          <a href="/intelligence" on:click={closeDropdowns}>Intelligence</a>
-          <a href="/rules" on:click={closeDropdowns}>Rules</a>
-          <a href="/events" on:click={closeDropdowns}>Events</a>
-          <a href="/zones" on:click={closeDropdowns}>Zones</a>
-        </div>
-      {/if}
-    </div>
+      <div class="nav-item">
+        <button class="nav-btn" on:click|stopPropagation={() => toggleDropdown('intelligence')}>Intelligence</button>
+        {#if openDropdown === 'intelligence'}
+          <div class="dropdown">
+            <a href="/analytics" on:click={closeDropdowns}>Analytics</a>
+            <a href="/intelligence" on:click={closeDropdowns}>Intelligence</a>
+            <a href="/rules" on:click={closeDropdowns}>Rules</a>
+            <a href="/events" on:click={closeDropdowns}>Events</a>
+            <a href="/zones" on:click={closeDropdowns}>Zones</a>
+          </div>
+        {/if}
+      </div>
 
-    <div class="nav-item">
-      <button class="nav-btn" on:click|stopPropagation={() => toggleDropdown('models')}>Models</button>
-      {#if openDropdown === 'models'}
-        <div class="dropdown">
-          <a href="/models" on:click={closeDropdowns}>Models</a>
-          <a href="/pipelines" on:click={closeDropdowns}>AI Pipelines</a>
-        </div>
-      {/if}
-    </div>
+      <div class="nav-item">
+        <button class="nav-btn" on:click|stopPropagation={() => toggleDropdown('models')}>Models</button>
+        {#if openDropdown === 'models'}
+          <div class="dropdown">
+            <a href="/models" on:click={closeDropdowns}>Models</a>
+            <a href="/pipelines" on:click={closeDropdowns}>AI Pipelines</a>
+          </div>
+        {/if}
+      </div>
 
-    <div class="nav-item">
-      <button class="nav-btn" on:click|stopPropagation={() => toggleDropdown('system')}>System</button>
-      {#if openDropdown === 'system'}
-        <div class="dropdown">
-          <a href="/recordings" on:click={closeDropdowns}>Recordings</a>
-          <a href="/search" on:click={closeDropdowns}>Search</a>
-          <a href="/notifications" on:click={closeDropdowns}>Notifications</a>
-          <a href="/users" on:click={closeDropdowns}>Users</a>
-          <a href="/settings" on:click={closeDropdowns}>Settings</a>
-        </div>
-      {/if}
-    </div>
+      <div class="nav-item">
+        <button class="nav-btn" on:click|stopPropagation={() => toggleDropdown('system')}>System</button>
+        {#if openDropdown === 'system'}
+          <div class="dropdown">
+            <a href="/recordings" on:click={closeDropdowns}>Recordings</a>
+            <a href="/search" on:click={closeDropdowns}>Search</a>
+            <a href="/notifications" on:click={closeDropdowns}>Notifications</a>
+            <a href="/users" on:click={closeDropdowns}>Users</a>
+            <a href="/settings" on:click={closeDropdowns}>Settings</a>
+          </div>
+        {/if}
+      </div>
 
-    {#if signedIn}<a href="#logout" on:click|preventDefault={signOut}>Sign out</a>{:else}<a href="/login">Sign in</a>{/if}
+      <a href="#logout" on:click|preventDefault={signOut}>Sign out</a>
+    {:else}
+      <a href="/login">Sign in</a>
+    {/if}
   </div>
 </nav>
 
-{#if update?.update_available}<aside class="update"><strong>Objexel {update.latest_version} is available.</strong><span>Updates are operator-controlled: back up PostgreSQL and media before upgrading.</span>{#if update.release_url}<a href={update.release_url} target="_blank" rel="noreferrer">Read release notes</a>{/if}</aside>{/if}
+{#if signedIn && update?.update_available}<aside class="update"><strong>Objexel {update.latest_version} is available.</strong><span>Updates are operator-controlled: back up PostgreSQL and media before upgrading.</span>{#if update.release_url}<a href={update.release_url} target="_blank" rel="noreferrer">Read release notes</a>{/if}</aside>{/if}
 <main><slot /></main>
 
 <style>
