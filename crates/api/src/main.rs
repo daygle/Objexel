@@ -130,6 +130,15 @@ async fn fetch_remote_catalog(url: &str) -> anyhow::Result<Vec<objexel_common::M
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().with_env_filter(env::var("RUST_LOG").unwrap_or_else(|_| "info".into())).init();
+
+    // Fail fast if the CPU lacks AVX2 - the prebuilt ONNX Runtime binaries require it.
+    #[cfg(target_arch = "x86_64")]
+    if !std::arch::is_x86_feature_detected!("avx2") {
+        tracing::error!("CPU does not support AVX2 - ONNX Runtime prebuilt binaries require it");
+        tracing::error!("Use a machine with AVX2 support, or build with a custom ONNX Runtime");
+        return Err(anyhow::anyhow!("AVX2 not supported on this CPU"));
+    }
+
     let database = match env::var("DATABASE_URL") {
         Ok(url) => {
             let database = loop {
