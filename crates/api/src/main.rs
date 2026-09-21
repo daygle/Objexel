@@ -1,4 +1,5 @@
-use objexel_api::{broadcast_pipeline_result, live_channel, router, AppState};
+use async_trait::async_trait;
+use objexel_api::{broadcast_pipeline_result, live_channel, router, validate_model_catalog_entry, AppState, CameraRuntime};
 use objexel_camera::{CameraService, FrameIngestor, IngestorConfig};
 use objexel_detector::FrameTensor;
 use objexel_pipeline::ObservationPipeline;
@@ -6,9 +7,117 @@ use objexel_playback::PlaybackService;
 use objexel_recorder::{Recorder, RecorderConfig};
 use objexel_models::ModelRegistry;
 use objexel_database::Database;
-use std::env;
-use tokio::net::TcpListener;
+use std::{collections::HashMap, env, sync::Arc};
+use tokio::{net::TcpListener, sync::{Mutex, oneshot}, task::JoinHandle};
 use tower_http::services::{ServeDir, ServeFile};
+use uuid::Uuid;
+
+struct RecordingHandle {
+    stop: oneshot::Sender<()>,
+    task: JoinHandle<()>,
+}
+
+struct LiveCameraRuntime {
+    ingestor: FrameIngestor,
+    pipeline: Option<ObservationPipeline>,
+    events: objexel_api::LiveEventSender,
+    recorder: Recorder,
+    database: Option<Database>,
+    handles: Mutex<HashMap<Uuid, JoinHandle<()>>>,
+    recording_handles: Mutex<HashMap<Uuid, RecordingHandle>>,
+}
+
+impl LiveCameraRuntime {
+    async fn stop_recording(&self, camera_id: Uuid) {
+        if let Some(handle) = self.recording_handles.lock().await.remove(&camera_id) {
+            let _ = handle.stop.send(());
+            let _ = handle.task.await;
+            tracing::info!(camera_id = %camera_id, "continuous recording stopped");
+        }
+    }
+
+    async fn start_recording(&self, camera: &objexel_common::Camera) {
+        let Some(database) = &self.database else { return; };
+        let recorder = self.recorder.clone();
+        let database = database.clone();
+        let camera_id = camera.id;
+        let rtsp_url = camera.rtsp_url.clone();
+        let (stop, mut stop_rx) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            let mut retry_delay = std::time::Duration::from_secs(2);
+            loop {
+                match recorder.start_continuous(camera_id, &rtsp_url).await {
+                    Ok((recording, mut child)) => {
+                        if let Err(error) = database.insert_recording(&recording).await {
+                            tracing::warn!(camera_id = %camera_id, %error, "could not persist recording metadata");
+                        }
+                        tracing::info!(camera_id = %camera_id, "continuous recording started");
+                        tokio::select! {
+                            result = child.wait() => {
+                                if let Err(error) = result { tracing::warn!(camera_id = %camera_id, %error, "continuous recording exited"); }
+                                else { tracing::warn!(camera_id = %camera_id, "continuous recording exited unexpectedly"); }
+                            }
+                            _ = &mut stop_rx => {
+                                if let Err(error) = child.kill().await { tracing::debug!(camera_id = %camera_id, %error, "recording process was already stopped"); }
+                                let _ = child.wait().await;
+                                return;
+                            }
+                        }
+                        retry_delay = std::time::Duration::from_secs(2);
+                    }
+                    Err(error) => tracing::warn!(camera_id = %camera_id, %error, "continuous recording could not start"),
+                }
+                tokio::select! {
+                    _ = tokio::time::sleep(retry_delay) => {},
+                    _ = &mut stop_rx => return,
+                }
+                retry_delay = std::cmp::min(retry_delay.saturating_mul(2), std::time::Duration::from_secs(60));
+            }
+        });
+        self.recording_handles.lock().await.insert(camera.id, RecordingHandle { stop, task });
+    }
+}
+
+#[async_trait]
+impl CameraRuntime for LiveCameraRuntime {
+    async fn apply(&self, camera: &objexel_common::Camera) -> anyhow::Result<()> {
+        self.remove(camera.id).await?;
+        if !camera.enabled { return Ok(()); }
+        self.start_recording(camera).await;
+        let Some(pipeline) = &self.pipeline else { return Ok(()); };
+        let pipeline = pipeline.clone();
+        let events = self.events.clone();
+        let camera_id = camera.id;
+        let handle = self.ingestor.spawn(camera_id, &camera.rtsp_url, move |frame| {
+            let pipeline = pipeline.clone();
+            let events = events.clone();
+            async move {
+                let tensor = FrameTensor {
+                    camera_id,
+                    observed_at: chrono::Utc::now(),
+                    shape: vec![1, 3, frame.height as usize, frame.width as usize],
+                    data: frame.data.iter().map(|&pixel| pixel as f32 / 255.0).collect(),
+                };
+                match pipeline.process_frame(tensor).await {
+                    Ok(result) => broadcast_pipeline_result(&events, &result),
+                    Err(error) => tracing::warn!(camera_id = %camera_id, %error, "live frame processing failed"),
+                }
+            }
+        });
+        self.handles.lock().await.insert(camera.id, handle);
+        tracing::info!(camera_id = %camera.id, "live camera runtime started");
+        Ok(())
+    }
+
+    async fn remove(&self, camera_id: Uuid) -> anyhow::Result<()> {
+        self.stop_recording(camera_id).await;
+        if let Some(handle) = self.handles.lock().await.remove(&camera_id) {
+            handle.abort();
+            tracing::info!(camera_id = %camera_id, "live camera runtime stopped");
+        }
+        Ok(())
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -27,6 +136,25 @@ async fn main() -> anyhow::Result<()> {
             if let Err(error) = database.migrate().await {
                 tracing::error!(%error, "database migration failed");
                 return Err(error);
+            }
+            if let Ok(path) = env::var("OBJEXEL_MODEL_CATALOG") {
+                match tokio::fs::read_to_string(&path).await {
+                    Ok(contents) => match serde_json::from_str::<Vec<objexel_common::ModelCatalogEntry>>(&contents) {
+                        Ok(entries) => {
+                            for entry in entries {
+                                if let Err(error) = validate_model_catalog_entry(&entry) {
+                                    tracing::warn!(catalog_id = %entry.id, %error, "invalid model catalog entry");
+                                    continue;
+                                }
+                                if let Err(error) = database.upsert_model_catalog(&entry).await {
+                                    tracing::warn!(catalog_id = %entry.id, %error, "could not import model catalog entry");
+                                }
+                            }
+                        }
+                        Err(error) => tracing::warn!(%error, path = %path, "could not parse model catalog file"),
+                    },
+                    Err(error) => tracing::warn!(%error, path = %path, "could not read model catalog file"),
+                }
             }
             Some(database)
         }
@@ -51,15 +179,6 @@ async fn main() -> anyhow::Result<()> {
         for camera in database.list_cameras().await? {
             if camera.enabled {
                 let health_database = database.clone();
-                let recording_camera = camera.clone();
-                let recording_service = recorder.clone();
-                match recording_service.start_continuous(recording_camera.id, &recording_camera.rtsp_url).await {
-                    Ok((recording, mut child)) => {
-                        if let Err(error) = database.insert_recording(&recording).await { tracing::warn!(%error, "could not persist recording metadata"); }
-                        tokio::spawn(async move { let _ = child.wait().await; });
-                    }
-                    Err(error) => tracing::warn!(camera_id = %recording_camera.id, %error, "continuous recording could not start"),
-                }
                 camera_service.spawn_monitor(camera, move |result| {
                     let health_database = health_database.clone();
                     async move {
@@ -126,39 +245,26 @@ async fn main() -> anyhow::Result<()> {
     // exposes the endpoint even in health-only mode (it simply never emits).
     let events = live_channel(256);
     // --- Live frame ingestion ---------------------------------------------------
-    if let (Some(database), Some(pipeline)) = (&database, &pipeline) {
-        let ingestor = FrameIngestor::new(IngestorConfig { fps: ingestor_fps, ..IngestorConfig::default() });
-        for camera in database.list_cameras().await? {
-            if !camera.enabled { continue; }
-            let pipeline = pipeline.clone();
-            let events = events.clone();
-            let camera_id = camera.id;
-            ingestor.spawn(camera_id, &camera.rtsp_url, move |frame| {
-                let pipeline = pipeline.clone();
-                let events = events.clone();
-                async move {
-                    let tensor = FrameTensor {
-                        camera_id,
-                        observed_at: chrono::Utc::now(),
-                        shape: vec![1, 3, frame.height as usize, frame.width as usize],
-                        data: frame.data.iter().map(|&pixel| pixel as f32 / 255.0).collect(),
-                    };
-                    match pipeline.process_frame(tensor).await {
-                        Ok(result) => {
-                            broadcast_pipeline_result(&events, &result);
-                            tracing::debug!(camera_id = %camera_id, detections = result.detections.len(), "live frame processed");
-                        }
-                        Err(error) => {
-                            tracing::warn!(camera_id = %camera_id, %error, "live frame processing failed");
-                        }
-                    }
-                }
-            });
-            tracing::info!(camera_id = %camera_id, fps = ingestor_fps, "live frame ingestor started");
+    // Keep camera handles in a shared runtime so API-created, edited, disabled, and
+    // deleted cameras take effect immediately instead of requiring a restart.
+    let camera_runtime: Option<Arc<dyn CameraRuntime>> = Some(Arc::new(LiveCameraRuntime {
+        ingestor: FrameIngestor::new(IngestorConfig { fps: ingestor_fps, ..IngestorConfig::default() }),
+        pipeline: pipeline.clone(),
+        events: events.clone(),
+        recorder: recorder.clone(),
+        database: database.clone(),
+        handles: Mutex::new(HashMap::new()),
+        recording_handles: Mutex::new(HashMap::new()),
+    }));
+    if let Some(database) = &database {
+        if let Some(runtime) = &camera_runtime {
+            for camera in database.list_cameras().await? {
+                runtime.apply(&camera).await?;
+            }
         }
     }
 
-    let app = router(AppState { database, camera_service, pipeline, recorder, playback, events });
+    let app = router(AppState { database, camera_runtime, camera_service, pipeline, recorder, playback, events });
     let web_dir = env::var("OBJEXEL_WEB_DIR").unwrap_or_else(|_| "/usr/local/share/objexel/web".into());
     let app = app.fallback_service(ServeDir::new(&web_dir).not_found_service(ServeFile::new(format!("{web_dir}/index.html"))));
     let address = env::var("OBJEXEL_BIND").unwrap_or_else(|_| "0.0.0.0:8080".into());

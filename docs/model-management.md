@@ -13,7 +13,28 @@ Catalog entries are stored in PostgreSQL and contain:
 - class labels
 - optional `tar.gz` or `zip` archive format
 
-Only catalog entries already present in the database can be downloaded. There is no arbitrary URL field in the web UI.
+Only catalog entries already present in the database can be downloaded. There is no arbitrary URL field in the web UI. Catalog entries can be imported by an administrator through the API or at startup from `OBJEXEL_MODEL_CATALOG`.
+
+The file is a JSON array:
+
+```json
+[
+  {
+    "id": "synthetic-yolo-v1",
+    "name": "Synthetic YOLO",
+    "version": "1.0.0",
+    "model_type": "yolo",
+    "download_url": "https://models.example.invalid/synthetic-yolo-v1.onnx",
+    "sha256": "<64 hexadecimal SHA-256 characters>",
+    "input_width": 640,
+    "input_height": 640,
+    "class_list": ["person", "car"],
+    "archive_format": null
+  }
+]
+```
+
+Set `OBJEXEL_MODEL_CATALOG=/path/to/catalog.json` before starting the API, or POST the same array to `/api/models/catalog/import`. URLs, checksums, dimensions, and labels are validated before entries are stored.
 
 ## Download workflow
 
@@ -29,7 +50,7 @@ Failed downloads never become selectable models. Temporary files are removed aft
 
 ## Metadata and labels
 
-Catalog metadata supplies the ONNX input dimensions and class labels used by the detector. Labels are passed into inference so detections can be named instead of returned as numeric class IDs. If a locally registered model has no labels, the detector falls back to `class_N` names.
+Catalog metadata supplies the ONNX input dimensions and class labels used by the detector. Labels are passed into inference so detections can be named instead of returned as numeric class IDs. If a locally registered model has no labels, the detector falls back to `class_N` names. For standard COCO-trained YOLO exports, use model type `yolo-coco`; when no labels are supplied, Objexel automatically applies the standard COCO-80 ordering, including `cat` at class ID 15.
 
 ## Enable and activate
 
@@ -47,6 +68,7 @@ Model files should be kept on persistent storage and backed up with the applicat
 - `PATCH /api/models/{id}` with `{ "enabled": true|false }`
 - `POST /api/models/{id}/activate`
 - `GET /api/models/catalog`
+- `POST /api/models/catalog/import` with a JSON array of trusted catalog entries
 - `POST /api/models/catalog/{id}/download`
 - `GET /api/models/downloads/{id}`
 - `POST /api/models/reload`

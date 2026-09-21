@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: objexel
+      POSTGRES_USER: objexel
+      POSTGRES_PASSWORD: objexel
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U objexel -d objexel"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    ports:
+      - "8554:8554"
+      - "8888:8888"
+
+  test-camera:
+    image: jrottenberg/ffmpeg:6.0-ubuntu
+    depends_on:
+      - mediamtx
+    command:
+      - -hide_banner
+      - -loglevel
+      - error
+      - -re
+      - -f
+      - lavfi
+      - -i
+      - testsrc2=size=640x480:rate=15
+      - -vf
+      - drawbox=x='mod(t*40,560)':y=180:w=80:h=120:color=red:t=fill
+      - -c:v
+      - libx264
+      - -preset
+      - ultrafast
+      - -tune
+      - zerolatency
+      - -f
+      - rtsp
+      - rtsp://mediamtx:8554/camera1
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"

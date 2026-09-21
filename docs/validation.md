@@ -24,6 +24,8 @@ setup, scenario execution, and expected results.
 
 ### Docker Compose — `docker-compose.validation.yml`
 
+The repository includes a runnable validation stack with PostgreSQL, MediaMTX, a synthetic RTSP camera, and Mailpit. Use that file directly; the abbreviated example below describes the services it provides.
+
 ```yaml
 version: "3.9"
 services:
@@ -84,6 +86,7 @@ services:
 ```bash
 docker compose -f docker-compose.validation.yml up -d
 # Wait for PostgreSQL healthcheck to pass
+docker compose -f docker-compose.validation.yml ps
 sleep 5
 ```
 
@@ -98,6 +101,8 @@ sleep 5
 export DATABASE_URL="postgres://objexel:objexel@localhost:5432/objexel"
 export OBJEXEL_INGEST_FPS=5
 export RUST_LOG=info,objexel_pipeline=debug,objexel_camera=debug
+export OBJEXEL_STORAGE_DIR="$PWD/.validation-storage"
+export OBJEXEL_MODEL_DIR="$PWD/models"
 
 # Build and run
 cargo run --release -p objexel-api
@@ -158,10 +163,8 @@ PROVIDER=$(curl -s -X POST http://localhost:8080/api/notification-providers \
     "provider_type": "email",
     "enabled": true,
     "configuration": {
-      "host": "smtp.example.com",
-      "port": 587,
-      "username": "alerts@example.com",
-      "password": "changeme",
+      "host": "127.0.0.1",
+      "port": 1025,
       "from": "alerts@example.com",
       "to": "you@example.com"
     }
@@ -460,7 +463,7 @@ curl -s http://localhost:8080/api/tracks?limit=5 -b cookies.txt | \
 curl -s http://localhost:8080/api/action-executions?limit=5 -b cookies.txt | \
   jq '.[] | {status, error_message}'
 
-# Test notification manually
+# Test notification manually (view messages at http://localhost:8025)
 curl -s -X POST http://localhost:8080/api/test-notification \
   -H "Content-Type: application/json" \
   -b cookies.txt \

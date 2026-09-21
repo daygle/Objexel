@@ -42,6 +42,7 @@
     message = response.ok ? 'Provider configuration saved' : await apiError(response); if (response.ok) { providerEdit = null; await load(); }
   }
   async function toggleProvider(provider: Provider) { const response = await api(`/api/notification-providers/${provider.id}`, { method:'PUT', json:{ enabled:!provider.enabled } }); message = response.ok ? `Provider ${provider.enabled ? 'disabled' : 'enabled'}` : await apiError(response); await load(); }
+  async function validateProvider(provider: Provider) { message = `Validating ${provider.provider_type} configuration…`; const response = await api(`/api/notification-providers/${provider.id}/validate`, { method:'POST' }); message = response.ok ? 'Provider configuration is valid' : await apiError(response); }
 
   async function createTemplate() {
     if (!tplName.trim() || !tplBody.trim()) { message = 'Template name and body are required'; return; }
@@ -78,7 +79,7 @@
 <section class="card section"><h2>Providers</h2>
   <div class="form"><select bind:value={providerType}><option value="internal">Internal</option><option value="email">Email</option><option value="webhook">Webhook</option><option value="mqtt">MQTT</option></select><textarea bind:value={providerConfig} placeholder="Provider JSON config, e.g. an https webhook URL or MQTT topic"></textarea><button on:click={createProvider}>Create provider</button></div>
   {#each providers as provider}
-    <div class="line"><div><strong>{provider.provider_type}</strong><small class="muted">{provider.id.slice(0,8)}</small></div><span class="pill" class:off={!provider.enabled}>{provider.enabled ? 'Enabled' : 'Disabled'}</span><div class="line-actions"><button class="ghost" on:click={() => startProviderEdit(provider)}>Edit config</button><button class="ghost" on:click={() => toggleProvider(provider)}>{provider.enabled ? 'Disable' : 'Enable'}</button></div></div>
+    <div class="line"><div><strong>{provider.provider_type}</strong><small class="muted">{provider.id.slice(0,8)}</small></div><span class="pill" class:off={!provider.enabled}>{provider.enabled ? 'Enabled' : 'Disabled'}</span><div class="line-actions"><button class="ghost" on:click={() => validateProvider(provider)}>Validate</button><button class="ghost" on:click={() => startProviderEdit(provider)}>Edit config</button><button class="ghost" on:click={() => toggleProvider(provider)}>{provider.enabled ? 'Disable' : 'Enable'}</button></div></div>
     {#if providerEdit === provider.id}<div class="edit-block"><textarea bind:value={providerEditConfig}></textarea><div class="line-actions"><button on:click={() => saveProviderConfig(provider)}>Save config</button><button class="ghost" on:click={() => providerEdit = null}>Cancel</button></div></div>{/if}
   {/each}
 </section>

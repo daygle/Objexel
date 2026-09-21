@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 chrono.workspace = true
 objexel-auth = { path = "../auth" }
 axum.workspace = true
@@ -21,11 +22,13 @@ objexel-detector = { path = "../detector" }
 reqwest.workspace = true
 objexel-pipeline = { path = "../pipeline" }
 objexel-models = { path = "../models" }
+objexel-notifications = { path = "../notifications" }
 objexel-playback = { path = "../playback" }
 objexel-recorder = { path = "../recorder" }
 objexel-search = { path = "../search" }
 objexel-rules = { path = "../rules" }
 objexel-zones = { path = "../zones" }
+oxvif = { version = "0.17", features = ["serde"] }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

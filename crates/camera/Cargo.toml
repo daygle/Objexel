@@ -14,3 +14,4 @@ serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+oxvif = { version = "0.17", features = ["serde"] }

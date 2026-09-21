@@ -4,10 +4,15 @@
 
   type Model = { id: string; name: string; version: string; default_model: boolean };
   type Camera = { id: string; name: string; rtsp_url: string; status: string; enabled: boolean; active_model_id?: string };
+  type OnvifDevice = { endpoint: string; types: string[]; scopes: string[]; xaddrs: string[] };
+  type OnvifProfile = { token: string; name?: string; width?: number; height?: number; rtsp_uri?: string };
 
   let cameras: Camera[] = [];
   let models: Model[] = [];
   let message = '';
+  let onvifDevices: OnvifDevice[] = [];
+  let discovering = false;
+  let onvifUsername = ''; let onvifPassword = ''; let selectedService = ''; let onvifProfiles: OnvifProfile[] = []; let loadingProfiles = false;
 
   // New camera form
   let name = '';
@@ -54,6 +59,26 @@
     if (response.ok) await load();
   }
 
+  async function loadOnvifProfiles(serviceUrl: string) {
+    selectedService = serviceUrl; loadingProfiles = true; onvifProfiles = [];
+    const response = await api('/api/onvif/profiles', { method: 'POST', json: { device_service_url: serviceUrl, username: onvifUsername, password: onvifPassword } });
+    if (response.ok) { onvifProfiles = (await response.json()).profiles ?? []; message = `Found ${onvifProfiles.length} ONVIF profile(s)`; }
+    else message = await apiError(response);
+    loadingProfiles = false;
+  }
+
+  async function discoverOnvif() {
+    discovering = true;
+    message = 'Searching the local network for ONVIF cameras…';
+    const response = await api('/api/onvif/discover', { method: 'POST' });
+    if (response.ok) {
+      const result = await response.json();
+      onvifDevices = result.devices ?? [];
+      message = onvifDevices.length ? `Found ${onvifDevices.length} ONVIF device(s)` : 'No ONVIF devices found';
+    } else message = await apiError(response);
+    discovering = false;
+  }
+
   async function test(camera: Camera) {
     message = `Testing ${camera.name}…`;
     const response = await api(`/api/cameras/${camera.id}/test`, { method: 'POST' });
@@ -80,6 +105,13 @@
 <h1>Camera configuration</h1>
 <p class="muted">Register RTSP cameras, verify connectivity, and choose the detector that best fits each stream. Cameras without an override use the active global model.</p>
 {#if message}<p class="pill">{message}</p>{/if}
+
+<section class="card form">
+  <div class="row"><div><strong>ONVIF discovery</strong><p class="muted">Searches the local network. Discovery may not cross Docker, VLAN, or firewall boundaries.</p></div><button class="ghost" on:click={discoverOnvif} disabled={discovering}>{discovering ? 'Discovering…' : 'Discover ONVIF cameras'}</button></div>
+  <div class="onvif-credentials"><input bind:value={onvifUsername} placeholder="ONVIF username" /><input type="password" bind:value={onvifPassword} placeholder="ONVIF password" /></div>
+  {#if onvifDevices.length}<div class="discovered">{#each onvifDevices as device}<div class="discovered-row"><span><strong>{device.scopes.find((scope) => scope.includes('/name/'))?.split('/name/')[1] ?? 'ONVIF device'}</strong><small>{device.xaddrs[0] ?? device.endpoint}</small></span><button class="ghost" on:click={() => loadOnvifProfiles(device.xaddrs[0])} disabled={!device.xaddrs[0] || loadingProfiles}>{selectedService === device.xaddrs[0] && loadingProfiles ? 'Loading…' : 'Get profiles'}</button></div>{/each}</div>{/if}
+  {#if onvifProfiles.length}<div class="profiles-list">{#each onvifProfiles as profile}<div class="discovered-row"><span><strong>{profile.name ?? profile.token}</strong><small>{profile.width ?? '?'} × {profile.height ?? '?'}{profile.rtsp_uri ? ` · ${profile.rtsp_uri}` : ' · no RTSP URI'}</small></span><button class="ghost" on:click={() => { if (profile.rtsp_uri) rtspUrl = profile.rtsp_uri; }}>Use RTSP</button></div>{/each}</div>{/if}
+</section>
 
 <section class="card form">
   <div class="form-row">
@@ -132,6 +164,8 @@
 
 <style>
   .form { margin-top: 28px; }
+  .form .row{align-items:flex-start}.form .row>div{flex:1}.form .row p{margin:5px 0 0}.form button.ghost{border:1px solid #355164;border-radius:6px;background:transparent;color:#dce8f1;padding:9px 12px}  .onvif-credentials{display:flex;gap:8px;flex-wrap:wrap}.onvif-credentials input{flex:1;min-width:180px;background:#0b1017;color:#e7edf5;border:1px solid #355164;border-radius:6px;padding:9px}.discovered,.profiles-list{display:grid;gap:8px;margin-top:12px;padding-top:12px;border-top:1px solid #223342}.discovered-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px;background:#0f1922;border-radius:6px}.discovered-row small{display:block;word-break:break-all}
+
   .form-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .form-row input:not([type=checkbox]) { flex: 1; min-width: 180px; background: #0b1017; color: #e7edf5; border: 1px solid #355164; border-radius: 6px; padding: 10px; }
   .check { display: flex; align-items: center; gap: 6px; color: #8293a4; font-size: .85rem; }
