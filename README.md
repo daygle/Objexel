@@ -13,10 +13,11 @@ Objexel is a self-hosted, Linux-first AI camera platform for object detection, t
 
 ## Quick start
 
-The recommended deployment is Docker Compose on Debian 13 or Ubuntu 24.04+.
+The recommended deployment is Docker Compose on Debian 13 or Ubuntu 24.04+. Install Docker Engine and the Compose plugin first — see [Install Docker Engine](docs/installation.md#install-docker-engine).
 
 ```sh
-mkdir -p /opt/objexel
+sudo mkdir -p /opt/objexel
+sudo chown -R "$USER":"$USER" /opt/objexel
 cd /opt/objexel
 git clone https://github.com/daygle/Objexel.git .
 mkdir -p config models recordings clips snapshots backups
