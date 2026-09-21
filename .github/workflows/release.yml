@@ -70,6 +70,8 @@ jobs:
 
   release:
     name: Build and publish release image
+    needs: publish-models
+    if: ${{ always() && (needs.publish-models.result == 'success' || needs.publish-models.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
