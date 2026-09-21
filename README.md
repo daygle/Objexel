@@ -21,7 +21,7 @@ sudo chown -R "$USER":"$USER" /opt/objexel
 cd /opt/objexel
 git clone https://github.com/daygle/Objexel.git .
 mkdir -p config models recordings clips snapshots backups
-printf 'POSTGRES_PASSWORD=%s\nOBJEXEL_COOKIE_SECURE=1\n' "$(openssl rand -hex 24)" > .env
+printf 'POSTGRES_PASSWORD=%s\nOBJEXEL_COOKIE_SECURE=0\n' "$(openssl rand -hex 24)" > .env
 docker compose up -d --build
 curl -fsS http://localhost:8080/liveness
 ```

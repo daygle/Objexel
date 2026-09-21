@@ -63,12 +63,12 @@ else
   git clone https://github.com/daygle/Objexel.git .
 fi
 mkdir -p config models recordings clips snapshots backups
-printf 'POSTGRES_PASSWORD=%s\nOBJEXEL_COOKIE_SECURE=1\n' "$(openssl rand -hex 24)" > .env
+printf 'POSTGRES_PASSWORD=%s\nOBJEXEL_COOKIE_SECURE=0\n' "$(openssl rand -hex 24)" > .env
 docker compose up -d --build
 curl -fsS http://localhost:8080/liveness
 ```
 
-The Compose file starts PostgreSQL, waits for its health check, applies SQLx migrations, and starts the API. The API container also serves the built web UI and its static assets on port 8080. The generated `.env` keeps PostgreSQL off the host network and enables secure cookies for HTTPS deployments. If TLS is terminated elsewhere, keep the API on a private network and preserve `OBJEXEL_COOKIE_SECURE=1`. **If you are not terminating TLS and publish the API directly on plain HTTP, set `OBJEXEL_COOKIE_SECURE=0` in `.env`, or browsers will refuse to store the session cookie and you will be stuck on `/login`/`/setup` with `authentication required` errors.**
+The Compose file starts PostgreSQL, waits for its health check, applies SQLx migrations, and starts the API. The API container also serves the built web UI and its static assets on port 8080. The generated `.env` keeps PostgreSQL off the host network. The default `OBJEXEL_COOKIE_SECURE=0` works with plain HTTP on your LAN. **When you put the API behind HTTPS, set `OBJEXEL_COOKIE_SECURE=1` in `.env` and redeploy so browsers send the session cookie over the encrypted connection.**
 
 ## First run
 
@@ -78,7 +78,7 @@ The Compose file starts PostgreSQL, waits for its health check, applies SQLx mig
 4. Add a camera under Cameras using its RTSP URL.
 5. Place ONNX files under `/opt/objexel/models` and reload Models.
 6. Assign a model to the camera and verify `/readiness` and `/metrics`.
-7. Put the API behind HTTPS before allowing access outside the trusted LAN.
+7. Put the API behind HTTPS before allowing access outside the trusted LAN, and set `OBJEXEL_COOKIE_SECURE=1` in `.env`.
 
 The setup endpoint is permanently disabled after the first user is created.
 

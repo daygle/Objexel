@@ -28,7 +28,7 @@ services:
       RUST_LOG: ${RUST_LOG:-info}
       OBJEXEL_STORAGE_DIR: /var/lib/objexel
       OBJEXEL_MODEL_DIR: /models
-      OBJEXEL_COOKIE_SECURE: ${OBJEXEL_COOKIE_SECURE:-1}
+      OBJEXEL_COOKIE_SECURE: ${OBJEXEL_COOKIE_SECURE:-0}
     ports:
       - "8080:8080"
     restart: unless-stopped
