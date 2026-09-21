@@ -40,7 +40,7 @@ services:
       retries: 3
       start_period: 15s
     volumes:
-      - ./models:/models:ro
+      - ./models:/models
       - ./recordings:/var/lib/objexel/recordings
       - ./clips:/var/lib/objexel/clips
       - ./snapshots:/var/lib/objexel/snapshots
