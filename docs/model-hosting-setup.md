@@ -21,77 +21,26 @@ whole family and uploads it to the release for you — nothing to install locall
 
 You can also trigger it by pushing a tag, e.g. `git tag models-v1 && git push origin models-v1`.
 
-Then jump to [Step 5 — Verify in the app](#step-5--verify-in-the-app).
+Then [verify in the app](#verify-in-the-app).
 
-## Option B — export locally
+## Option B — export locally (advanced)
 
-Use this if you would rather build the files on your own machine. It needs Python.
-
-### Prerequisites
-
-- Python 3.9+ with `pip`
-- Push access to `daygle/Objexel` (to create the release)
-- ~1 GB free disk for the exported models
-
-## Step 1 — Export the ONNX model family
-
-From a checkout of this repository:
+Only if you'd rather build the files on your own machine (air-gapped, custom weights, or
+no Actions access). Needs Python 3.9+ and ~1 GB disk. From a checkout of this repository:
 
 ```bash
 pip install "ultralytics==8.4.157" onnx
 python scripts/export_models.py --out dist/models
 ```
 
-This writes ten files to `dist/models/` (`yolo11{n,s,m,l,x}.onnx`,
-`yolo26{n,s,m,l,x}.onnx`) and regenerates `models/catalog.json` with each file's
-SHA-256. Using the pinned `ultralytics==8.4.157` reproduces the exact digests already
-committed in `models/catalog.json`.
+This writes the ten ONNX files to `dist/models/` and rewrites `models/catalog.json` with
+their digests. Then create a `models-v1` release, upload every `dist/models/*.onnx` as
+assets — keeping the exact filenames so the `models/catalog.json` URLs resolve — and
+commit the manifest if it changed (a different `ultralytics`/`torch` build can produce
+different digests). The `gh` equivalents are `gh release create models-v1` and
+`gh release upload models-v1 dist/models/*.onnx`.
 
-## Step 2 — Create the `models-v1` release
-
-Web UI: **Releases → Draft a new release → Tag: `models-v1` → target: `main` →
-Publish**.
-
-Or with the GitHub CLI:
-
-```bash
-gh release create models-v1 --repo daygle/Objexel \
-  --title "Objexel model weights v1" \
-  --notes "YOLO11 and YOLO26 ONNX exports for the built-in catalog."
-```
-
-## Step 3 — Upload the ONNX files as release assets
-
-Web UI: open the `models-v1` release, **Edit**, and drag every file from
-`dist/models/` into the assets area.
-
-Or with the GitHub CLI:
-
-```bash
-gh release upload models-v1 dist/models/*.onnx --repo daygle/Objexel
-```
-
-The asset filenames must stay exactly `yolo11n.onnx`, `yolo11s.onnx`, … so the
-download URLs in `models/catalog.json` resolve:
-
-```
-https://github.com/daygle/Objexel/releases/download/models-v1/<file>.onnx
-```
-
-## Step 4 — Commit the catalog (only if you re-exported)
-
-If Step 1 changed `models/catalog.json` (e.g. you used a different Ultralytics
-version), commit it so builds and the refresh endpoint agree with the uploaded files:
-
-```bash
-git add models/catalog.json
-git commit -m "Update model catalog checksums"
-git push
-```
-
-If the digests are unchanged, there is nothing to commit.
-
-## Step 5 — Verify in the app
+## Verify in the app
 
 1. Open **Models**. The catalog lists YOLO11 and YOLO26 (`n · s · m · l · x`).
 2. If you re-exported after the server started, click **Refresh catalog**.
@@ -104,14 +53,13 @@ A good default is **YOLO26n** (fastest) or **YOLO26m** (balanced).
 
 When you want to refresh to newer upstream weights:
 
-1. Re-run Step 1 (optionally with a newer `ultralytics`).
-2. Upload the new files to the release. To keep old versions, create a new tag
-   (e.g. `models-v2`) and run `export_models.py --release-tag models-v2`, then
-   commit the regenerated `models/catalog.json`.
-3. On each deployment, click **Refresh catalog** (or set `OBJEXEL_MODEL_CATALOG_URL`
+1. Re-run the **Publish model weights** workflow. To keep the old versions, run it with a
+   new tag (e.g. `models-v2`); the workflow exports, uploads, and reconciles
+   `models/catalog.json` for that tag.
+2. On each deployment, click **Refresh catalog** (or set `OBJEXEL_MODEL_CATALOG_URL`
    so the latest `models/catalog.json` is pulled at boot).
 
-`models/catalog.json` is always rewritten by the export script to match the files it
+`models/catalog.json` is always rewritten by the export step to match the files it
 produced, so the manifest and the uploaded assets never drift.
 
 ## Related operator settings
