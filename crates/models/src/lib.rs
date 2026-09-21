@@ -67,13 +67,15 @@ impl ModelRegistry {
         let mut response = response;
         let mut output = tokio::fs::File::create(&temporary).await?;
         let mut hasher = Sha256::new(); let mut downloaded: i64 = 0;
+        let mut last_reported: u8 = 0;
         progress(0, 0, total);
         while let Some(chunk) = response.chunk().await? {
             output.write_all(&chunk).await?; hasher.update(&chunk); downloaded += chunk.len() as i64;
             let percent = total.filter(|value| *value > 0).map(|value| ((downloaded * 100) / value).min(99) as u8).unwrap_or(0);
-            progress(percent, downloaded, total);
+            if percent > last_reported { last_reported = percent; progress(percent, downloaded, total); }
         }
         output.flush().await?; drop(output);
+        progress(99, downloaded, total);
         let digest = hex::encode(hasher.finalize());
         if !digest.eq_ignore_ascii_case(&entry.sha256) { let _=fs::remove_file(&temporary); bail!("SHA-256 verification failed"); }
         progress(100, downloaded, total);
