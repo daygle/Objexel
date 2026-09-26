@@ -1,4 +1,4 @@
-FROM node:25-slim AS web
+FROM node:26-slim AS web
 WORKDIR /web
 COPY web/package.json ./
 RUN npm install
