@@ -18,6 +18,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # svelte-check@4.7.6 (latest) declares peer typescript "^5.0.0 || ^6.0.0",
+      # so a TypeScript 7 bump makes `npm ci` fail with ERESOLVE. Remove this
+      # ignore once svelte-check widens its peer range to include 7.x.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-patch:
         update-types:
