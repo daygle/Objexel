@@ -50,16 +50,27 @@ pub struct CameraService {
 }
 
 impl Default for CameraService {
-    fn default() -> Self { Self::new(FfmpegConfig::default()) }
+    fn default() -> Self {
+        Self::new(FfmpegConfig::default())
+    }
 }
 
 impl CameraService {
     pub fn new(config: FfmpegConfig) -> Self {
-        Self { config, statuses: Arc::new(RwLock::new(HashMap::new())) }
+        Self {
+            config,
+            statuses: Arc::new(RwLock::new(HashMap::new())),
+        }
     }
 
     pub async fn set_status(&self, camera_id: Uuid, status: CameraStatus) {
-        let result = CameraTestResult { camera_id, status, latency_ms: None, metadata: None, error: None };
+        let result = CameraTestResult {
+            camera_id,
+            status,
+            latency_ms: None,
+            metadata: None,
+            error: None,
+        };
         self.statuses.write().await.insert(camera_id, result);
     }
 
@@ -92,7 +103,16 @@ impl CameraService {
         let output = timeout(
             self.config.command_timeout,
             Command::new(&self.config.ffprobe_bin)
-                .args(["-v", "error", "-rtsp_transport", "tcp", "-show_entries", "stream=codec_name,width,height,r_frame_rate", "-of", "json"])
+                .args([
+                    "-v",
+                    "error",
+                    "-rtsp_transport",
+                    "tcp",
+                    "-show_entries",
+                    "stream=codec_name,width,height,r_frame_rate",
+                    "-of",
+                    "json",
+                ])
                 .arg(&camera.rtsp_url)
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -102,21 +122,53 @@ impl CameraService {
         .context("ffprobe timed out")??;
         if !output.status.success() {
             let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-            return Err(anyhow!("ffprobe failed: {}", if error.is_empty() { "unknown error" } else { &error }));
+            return Err(anyhow!(
+                "ffprobe failed: {}",
+                if error.is_empty() {
+                    "unknown error"
+                } else {
+                    &error
+                }
+            ));
         }
-        let report: ProbeReport = serde_json::from_slice(&output.stdout).context("parse ffprobe metadata")?;
-        let stream = report.streams.into_iter().next().context("RTSP stream has no media streams")?;
+        let report: ProbeReport =
+            serde_json::from_slice(&output.stdout).context("parse ffprobe metadata")?;
+        let stream = report
+            .streams
+            .into_iter()
+            .next()
+            .context("RTSP stream has no media streams")?;
         tracing::debug!(camera_id = %camera.id, latency_ms = started.elapsed().as_millis(), "RTSP probe succeeded");
-        Ok(StreamMetadata { codec: stream.codec_name, width: stream.width, height: stream.height, frame_rate: stream.frame_rate })
+        Ok(StreamMetadata {
+            codec: stream.codec_name,
+            width: stream.width,
+            height: stream.height,
+            frame_rate: stream.frame_rate,
+        })
     }
 
     async fn capture_snapshot(&self, camera: &Camera) -> Result<Vec<u8>> {
         let output = timeout(
             self.config.command_timeout,
             Command::new(&self.config.ffmpeg_bin)
-                .args(["-hide_banner", "-loglevel", "error", "-rtsp_transport", "tcp", "-i"])
+                .args([
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-rtsp_transport",
+                    "tcp",
+                    "-i",
+                ])
                 .arg(&camera.rtsp_url)
-                .args(["-frames:v", "1", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"])
+                .args([
+                    "-frames:v",
+                    "1",
+                    "-f",
+                    "image2pipe",
+                    "-vcodec",
+                    "mjpeg",
+                    "pipe:1",
+                ])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .output(),
@@ -125,7 +177,14 @@ impl CameraService {
         .context("ffmpeg snapshot timed out")??;
         if !output.status.success() || output.stdout.is_empty() {
             let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-            return Err(anyhow!("snapshot capture failed: {}", if error.is_empty() { "empty image" } else { &error }));
+            return Err(anyhow!(
+                "snapshot capture failed: {}",
+                if error.is_empty() {
+                    "empty image"
+                } else {
+                    &error
+                }
+            ));
         }
         Ok(output.stdout)
     }
@@ -134,16 +193,37 @@ impl CameraService {
 #[async_trait]
 impl CameraManager for CameraService {
     async fn status(&self, camera_id: Uuid) -> Result<CameraStatus> {
-        Ok(self.statuses.read().await.get(&camera_id).map(|result| result.status.clone()).unwrap_or_default())
+        Ok(self
+            .statuses
+            .read()
+            .await
+            .get(&camera_id)
+            .map(|result| result.status.clone())
+            .unwrap_or_default())
     }
 
     async fn test_connection(&self, camera: &Camera) -> CameraTestResult {
         let started = std::time::Instant::now();
         let result = match self.probe(camera).await {
-            Ok(metadata) => CameraTestResult { camera_id: camera.id, status: CameraStatus::Online, latency_ms: Some(started.elapsed().as_millis() as u64), metadata: Some(metadata), error: None },
-            Err(error) => CameraTestResult { camera_id: camera.id, status: CameraStatus::Offline, latency_ms: Some(started.elapsed().as_millis() as u64), metadata: None, error: Some(error.to_string()) },
+            Ok(metadata) => CameraTestResult {
+                camera_id: camera.id,
+                status: CameraStatus::Online,
+                latency_ms: Some(started.elapsed().as_millis() as u64),
+                metadata: Some(metadata),
+                error: None,
+            },
+            Err(error) => CameraTestResult {
+                camera_id: camera.id,
+                status: CameraStatus::Offline,
+                latency_ms: Some(started.elapsed().as_millis() as u64),
+                metadata: None,
+                error: Some(error.to_string()),
+            },
         };
-        self.statuses.write().await.insert(camera.id, result.clone());
+        self.statuses
+            .write()
+            .await
+            .insert(camera.id, result.clone());
         result
     }
 
@@ -153,7 +233,10 @@ impl CameraManager for CameraService {
 }
 
 #[derive(Debug, Deserialize)]
-struct ProbeReport { #[serde(default)] streams: Vec<ProbeStream> }
+struct ProbeReport {
+    #[serde(default)]
+    streams: Vec<ProbeStream>,
+}
 
 #[derive(Debug, Deserialize)]
 struct ProbeStream {
@@ -210,14 +293,21 @@ pub struct FrameIngestor {
 }
 
 impl FrameIngestor {
-    pub fn new(config: IngestorConfig) -> Self { Self { config } }
+    pub fn new(config: IngestorConfig) -> Self {
+        Self { config }
+    }
 
     /// Spawn a long-lived decode loop for `camera_id` / `rtsp_url`.
     ///
     /// `on_frame` is called for every successfully decoded frame.  The future
     /// runs on the Tokio runtime, so keep the work inside it non-blocking or
     /// spawn heavy processing on a blocking pool.
-    pub fn spawn<F, Fut>(&self, camera_id: Uuid, rtsp_url: &str, on_frame: F) -> tokio::task::JoinHandle<()>
+    pub fn spawn<F, Fut>(
+        &self,
+        camera_id: Uuid,
+        rtsp_url: &str,
+        on_frame: F,
+    ) -> tokio::task::JoinHandle<()>
     where
         F: Fn(DecodedFrame) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = ()> + Send + 'static,
@@ -252,19 +342,27 @@ where
     F: Fn(DecodedFrame) -> Fut + Send + Sync,
     Fut: Future<Output = ()> + Send,
 {
-    let (width, height) = probe_dimensions(&config.ffprobe_bin, &config.connect_timeout, rtsp_url).await?;
+    let (width, height) =
+        probe_dimensions(&config.ffprobe_bin, &config.connect_timeout, rtsp_url).await?;
     let frame_bytes = (width * height * 3) as usize;
 
     let fps_arg = format!("{}", config.fps);
     let mut child = timeout(config.connect_timeout, async {
         Command::new(&config.ffmpeg_bin)
             .args([
-                "-hide_banner", "-loglevel", "error",
-                "-rtsp_transport", "tcp",
-                "-i", rtsp_url,
-                "-vf", &format!("fps={fps_arg}"),
-                "-f", "rawvideo",
-                "-pix_fmt", "rgb24",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-rtsp_transport",
+                "tcp",
+                "-i",
+                rtsp_url,
+                "-vf",
+                &format!("fps={fps_arg}"),
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgb24",
                 "pipe:1",
             ])
             .stdout(Stdio::piped())
@@ -283,7 +381,12 @@ where
     loop {
         match stdout.read_exact(&mut frame_buf).await {
             Ok(_) => {
-                on_frame(DecodedFrame { width, height, data: frame_buf.clone() }).await;
+                on_frame(DecodedFrame {
+                    width,
+                    height,
+                    data: frame_buf.clone(),
+                })
+                .await;
             }
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
                 break;
@@ -300,11 +403,24 @@ where
 }
 
 /// Probe the RTSP stream and return `(width, height)` of the first video stream.
-async fn probe_dimensions(ffprobe_bin: &str, command_timeout: &Duration, rtsp_url: &str) -> Result<(u32, u32)> {
+async fn probe_dimensions(
+    ffprobe_bin: &str,
+    command_timeout: &Duration,
+    rtsp_url: &str,
+) -> Result<(u32, u32)> {
     let output = timeout(
         *command_timeout,
         Command::new(ffprobe_bin)
-            .args(["-v", "error", "-rtsp_transport", "tcp", "-show_entries", "stream=width,height", "-of", "json"])
+            .args([
+                "-v",
+                "error",
+                "-rtsp_transport",
+                "tcp",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "json",
+            ])
             .arg(rtsp_url)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -315,11 +431,23 @@ async fn probe_dimensions(ffprobe_bin: &str, command_timeout: &Duration, rtsp_ur
 
     if !output.status.success() {
         let error = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        return Err(anyhow!("ffprobe failed: {}", if error.is_empty() { "unknown error" } else { &error }));
+        return Err(anyhow!(
+            "ffprobe failed: {}",
+            if error.is_empty() {
+                "unknown error"
+            } else {
+                &error
+            }
+        ));
     }
 
-    let report: ProbeReport = serde_json::from_slice(&output.stdout).context("parse ffprobe metadata")?;
-    let stream = report.streams.into_iter().next().context("RTSP stream has no video streams")?;
+    let report: ProbeReport =
+        serde_json::from_slice(&output.stdout).context("parse ffprobe metadata")?;
+    let stream = report
+        .streams
+        .into_iter()
+        .next()
+        .context("RTSP stream has no video streams")?;
     let width = stream.width.context("probed stream missing width")?;
     let height = stream.height.context("probed stream missing height")?;
     Ok((width, height))
@@ -332,7 +460,10 @@ mod tests {
     #[tokio::test]
     async fn missing_camera_is_unknown() {
         let service = CameraService::default();
-        assert_eq!(service.status(Uuid::new_v4()).await.unwrap(), CameraStatus::Unknown);
+        assert_eq!(
+            service.status(Uuid::new_v4()).await.unwrap(),
+            CameraStatus::Unknown
+        );
     }
 
     #[test]
@@ -364,7 +495,11 @@ mod tests {
 
     #[test]
     fn decoded_frame_holds_rgb24_data() {
-        let frame = DecodedFrame { width: 2, height: 2, data: vec![255u8; 12] };
+        let frame = DecodedFrame {
+            width: 2,
+            height: 2,
+            data: vec![255u8; 12],
+        };
         assert_eq!(frame.data.len(), (frame.width * frame.height * 3) as usize);
     }
 }

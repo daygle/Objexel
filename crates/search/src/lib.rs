@@ -18,7 +18,11 @@ pub struct SearchFilters {
     pub limit: Option<i64>,
 }
 
-impl SearchFilters { pub fn limit(&self) -> i64 { self.limit.unwrap_or(100).clamp(1, 500) } }
+impl SearchFilters {
+    pub fn limit(&self) -> i64 {
+        self.limit.unwrap_or(100).clamp(1, 500)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct SearchResult {

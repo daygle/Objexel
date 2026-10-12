@@ -12,11 +12,15 @@ pub enum CameraStatus {
 }
 
 impl Default for CameraStatus {
-    fn default() -> Self { Self::Unknown }
+    fn default() -> Self {
+        Self::Unknown
+    }
 }
 
 impl Default for EventSeverity {
-    fn default() -> Self { Self::Info }
+    fn default() -> Self {
+        Self::Info
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -42,7 +46,9 @@ pub struct CreateCamera {
     pub enabled: bool,
 }
 
-fn default_enabled() -> bool { true }
+fn default_enabled() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct UpdateCamera {
@@ -138,7 +144,9 @@ pub struct ModelDownload {
     pub updated_at: DateTime<Utc>,
 }
 
-fn default_input_size() -> u32 { 640 }
+fn default_input_size() -> u32 {
+    640
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct BenchmarkResult {
@@ -183,7 +191,9 @@ pub struct CreateModelAssignment {
     pub enabled: bool,
 }
 
-fn default_assignment_threshold() -> f32 { 0.25 }
+fn default_assignment_threshold() -> f32 {
+    0.25
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct FusionResult {
@@ -256,7 +266,9 @@ pub struct CreateZone {
     pub enabled: bool,
 }
 
-fn default_zone_colour() -> String { "#74e0b4".into() }
+fn default_zone_colour() -> String {
+    "#74e0b4".into()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct UpdateZone {
@@ -268,7 +280,11 @@ pub struct UpdateZone {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ZoneEventType { Entered, Exited, Occupied }
+pub enum ZoneEventType {
+    Entered,
+    Exited,
+    Occupied,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ZoneEvent {
@@ -283,7 +299,11 @@ pub struct ZoneEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum EventSeverity { Info, Warning, Critical }
+pub enum EventSeverity {
+    Info,
+    Warning,
+    Critical,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct RuleCondition {

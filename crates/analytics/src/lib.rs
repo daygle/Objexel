@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct AnalyticsMetric { pub label: String, pub count: i64 }
+pub struct AnalyticsMetric {
+    pub label: String,
+    pub count: i64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct AnalyticsSummary {
@@ -22,4 +25,10 @@ pub struct AnalyticsSummary {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
-pub struct AnalyticsSnapshot { pub id: Uuid, pub period: String, pub period_start: DateTime<Utc>, pub summary: serde_json::Value, pub created_at: DateTime<Utc> }
+pub struct AnalyticsSnapshot {
+    pub id: Uuid,
+    pub period: String,
+    pub period_start: DateTime<Utc>,
+    pub summary: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}
