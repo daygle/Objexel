@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { api, apiError } from '$lib/api';
+  import { api, apiError } from '#lib/api.ts';
   type Point = { x:number; y:number };
   type Zone = { id:string; name:string; colour:string; polygon_coordinates:Point[]; camera_id:string };
   type Camera = { id:string; name:string; status:string };

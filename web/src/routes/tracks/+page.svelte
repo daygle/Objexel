@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api } from '$lib/api';
+  import { api } from '#lib/api.ts';
   type Track = { id:string; object_class:string; first_seen:string; last_seen:string; duration_ms:number; movement_path: unknown[] };
   let tracks: Track[] = [];
   onMount(async () => { const response = await api('/api/tracks?limit=100'); if (response.ok) tracks = await response.json(); });

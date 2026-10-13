@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, apiError } from '$lib/api';
+  import { api, apiError } from '#lib/api.ts';
   type Assignment = { id:string; camera_id:string; model_id:string; priority:number; confidence_threshold:number; fps_limit?:number; enabled:boolean };
   type Fusion = { id:string; camera_id:string; detection_id:string; source_model_ids:string[]; fused_confidence:number; created_at:string };
   type Camera = { id:string; name:string }; type Model = { id:string; name:string; version:string };

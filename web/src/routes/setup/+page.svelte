@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
-  import { api, apiError, setCsrf, sessionActive, SESSION_NOT_STORED_MESSAGE } from '$lib/api';
+  import { api, apiError, setCsrf, sessionActive, SESSION_NOT_STORED_MESSAGE } from '#lib/api.ts';
   let username = ''; let email = ''; let password = ''; let message = ''; let busy = false; let ready = false;
   onMount(async () => { const response = await api('/api/auth/setup', { redirectOnUnauthorized:false }); if (response.ok) { const data = await response.json(); if (!data.setup_required) { await goto('/login'); return; } } ready = true; });
   async function submit() { busy = true; const response = await api('/api/auth/setup', { method:'POST', json:{ username, email: email || null, password, role:'administrator' }, redirectOnUnauthorized:false }); if (response.ok) { const result = await response.json(); setCsrf(result.csrf_token); if (await sessionActive()) await goto('/observations'); else message = SESSION_NOT_STORED_MESSAGE; } else message = await apiError(response); busy = false; }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, apiError } from '$lib/api';
+  import { api, apiError } from '#lib/api.ts';
   type Action = { id:string; name:string; action_type:string; enabled:boolean; provider_id?:string|null; template_id?:string|null; configuration:unknown };
   type Provider = { id:string; provider_type:string; enabled:boolean; configuration:unknown };
   type Template = { id:string; name:string; subject:string; body:string; html:boolean };

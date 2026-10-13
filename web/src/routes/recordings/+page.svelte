@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api } from '$lib/api';
+  import { api } from '#lib/api.ts';
   type Clip = { id:string; event_id?:string; clip_start:string; clip_end:string; clip_path:string };
   type Snapshot = { id:string; event_id?:string; camera_id:string; timestamp:string };
   type Recording = { id:string; camera_id:string; start_time:string; end_time?:string; file_path:string; mode:string };

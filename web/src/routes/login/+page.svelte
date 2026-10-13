@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
-  import { api, apiError, setCsrf, sessionActive, SESSION_NOT_STORED_MESSAGE } from '$lib/api';
+  import { api, apiError, setCsrf, sessionActive, SESSION_NOT_STORED_MESSAGE } from '#lib/api.ts';
   let username = ''; let password = ''; let message = ''; let busy = false;
   let setupNeeded = false;
   onMount(async () => { const response = await api('/api/auth/setup', { redirectOnUnauthorized:false }); if (response.ok) { const data = await response.json(); setupNeeded = data.setup_required; } });

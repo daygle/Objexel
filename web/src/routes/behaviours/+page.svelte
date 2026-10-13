@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api } from '$lib/api';
+  import { api } from '#lib/api.ts';
   type Behaviour = { id:string; track_id:string; camera_id:string; object_class:string; behaviour_type:string; confidence:number; summary:string; start_time:string; end_time:string; recording_id?:string; clip_id?:string };
   let behaviours: Behaviour[] = [];
   let filter = '';

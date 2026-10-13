@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, apiError } from '$lib/api';
+  import { api, apiError } from '#lib/api.ts';
   type UpdateInfo = { current_version:string; latest_version?:string; update_available:boolean; release_url?:string; notes?:string };
   type Metrics = { uptime_seconds:number; http_requests_total:number; cameras_total?:number; cameras_online?:number; active_tracks?:number; recent_detections?:number; database?:string; pipeline_cameras?:unknown[] };
 

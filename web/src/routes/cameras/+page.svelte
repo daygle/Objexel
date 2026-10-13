@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, apiError } from '$lib/api';
+  import { api, apiError } from '#lib/api.ts';
 
   type Model = { id: string; name: string; version: string; default_model: boolean };
   type Camera = { id: string; name: string; rtsp_url: string; status: string; enabled: boolean; active_model_id?: string };

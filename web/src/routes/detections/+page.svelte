@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api } from '$lib/api';
+  import { api } from '#lib/api.ts';
   type Detection = { id:string; object_class:string; confidence:number; bounding_box:{x:number;y:number;width:number;height:number}; observed_at:string };
   let detections: Detection[] = [];
   let classFilter = '';

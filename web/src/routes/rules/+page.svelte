@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, apiError } from '$lib/api';
+  import { api, apiError } from '#lib/api.ts';
 
   type Condition = { object_class?:string; zone_id?:string; observation_type?:string; behaviour_type?:string; confidence_threshold?:number; minimum_duration_ms?:number };
   type Rule = { id:string; name:string; description:string; enabled:boolean; severity:string; cooldown_seconds:number; suppression_seconds:number; conditions:Condition[]; action_ids:string[] };

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, apiError } from '$lib/api';
+  import { api, apiError } from '#lib/api.ts';
   type Identity = { id:string; object_class:string; display_name?:string; familiarity_score:number; familiarity:string; first_seen:string; last_seen:string; sightings:number };
   type History = { id:string; track_id:string; camera_id:string; similarity:number; observed_at:string };
   let identities: Identity[] = []; let selected: Identity | null = null; let history: History[] = []; let name = ''; let message = '';
