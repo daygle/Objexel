@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api } from '$lib/api';
-  import { subscribeLiveEvents } from '$lib/events';
+  import { api } from '#lib/api.ts';
+  import { subscribeLiveEvents } from '#lib/events.ts';
   type Event = { id:string; summary:string; event_type:string; severity:string; rule_id:string; created_at:string };
   let events: Event[] = []; let loading = true;
   let live = false;

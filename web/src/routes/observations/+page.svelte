@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api } from '$lib/api';
-  import { subscribeLiveEvents } from '$lib/events';
+  import { api } from '#lib/api.ts';
+  import { subscribeLiveEvents } from '#lib/events.ts';
   type Observation = { id:string; observation_type:string; summary:string; track_id:string; created_at:string };
   let observations: Observation[] = [];
   let loading = true;

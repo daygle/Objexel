@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, apiError } from '$lib/api';
+  import { api, apiError } from '#lib/api.ts';
   type User = { id:string; username:string; email?:string; role:string; enabled:boolean; created_at:string };
   let users: User[] = []; let message = ''; let loaded = false;
 

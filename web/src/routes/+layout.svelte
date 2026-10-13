@@ -2,7 +2,7 @@
   import '../app.css';
   import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
-  import { api, clearCsrf } from '$lib/api';
+  import { api, clearCsrf } from '#lib/api.ts';
   type UpdateInfo = { current_version:string; latest_version?:string; update_available:boolean; release_url?:string; notes?:string };
   let update: UpdateInfo | null = null;
   let signedIn = false;

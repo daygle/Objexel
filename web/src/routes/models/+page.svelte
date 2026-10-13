@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, apiError } from '$lib/api';
+  import { api, apiError } from '#lib/api.ts';
   type Model = { id:string; name:string; version:string; model_type:string; path:string; input_width:number; input_height:number; class_list:string[]; enabled:boolean; default_model:boolean };
   type Benchmark = { model_id:string; fps:number; average_inference_time_ms:number; gpu_memory_usage_mb?:number; test_timestamp:string };
   type CatalogEntry = { id:string; name:string; version:string; model_type:string; download_url:string; sha256:string; input_width:number; input_height:number; class_list:string[]; archive_format?:string };

@@ -25,6 +25,11 @@ updates:
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
     groups:
+      # Kit and its adapters peer-depend on each other's major version, so a
+      # major bump of one alone fails `npm ci` with ERESOLVE. Update together.
+      sveltekit:
+        patterns:
+          - "@sveltejs/*"
       npm-minor-patch:
         update-types:
           - minor

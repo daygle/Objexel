@@ -1,5 +1,5 @@
 import { goto } from '$app/navigation';
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 
 const CSRF_KEY = 'objexel_csrf';
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api } from '$lib/api';
+  import { api } from '#lib/api.ts';
   type Identity = { id:string; object_class:string; display_name?:string; familiarity:string; familiarity_score:number; sightings:number };
   type Anomaly = { id:string; identity_id?:string; behaviour_id?:string; anomaly_score:number; priority_score:number; priority:string; created_at:string };
   let identities: Identity[] = []; let anomalies: Anomaly[] = []; let loading = true;
