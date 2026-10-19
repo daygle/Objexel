@@ -2,14 +2,14 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use ndarray::{ArrayD, IxDyn};
 use objexel_common::{BoundingBox, Detection};
-use ort::{ep, session::Session, value::TensorRef};
+use ort::{environment::Environment, ep, session::Session, value::TensorRef};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     },
 };
 use uuid::Uuid;
@@ -413,8 +413,28 @@ fn inference_pool_size() -> usize {
         .unwrap_or(2)
 }
 
+/// ONNX Runtime allows a single environment per process and only holds a weak
+/// reference to it, so keep one alive for the lifetime of the process.
+fn ort_environment() -> Result<&'static Environment> {
+    static ENVIRONMENT: OnceLock<Environment> = OnceLock::new();
+    static INIT: Mutex<()> = Mutex::new(());
+    if let Some(environment) = ENVIRONMENT.get() {
+        return Ok(environment);
+    }
+    let _guard = INIT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(environment) = ENVIRONMENT.get() {
+        return Ok(environment);
+    }
+    let environment = ort::init()
+        .with_name("objexel")
+        .build()
+        .context("create ONNX Runtime environment")?;
+    Ok(ENVIRONMENT.get_or_init(|| environment))
+}
+
 fn build_session(config: &ModelConfig) -> Result<Session> {
-    let mut builder = Session::builder().context("create ONNX Runtime session builder")?;
+    let mut builder =
+        Session::builder(ort_environment()?).context("create ONNX Runtime session builder")?;
     // Prefer CUDA when compiled with the cuda feature, while retaining the built-in
     // CPU provider as a portable fallback. A failed provider configuration recovers
     // the builder so the session still loads with defaults.
