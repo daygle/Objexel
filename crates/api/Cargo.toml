@@ -28,7 +28,7 @@ objexel-recorder = { path = "../recorder" }
 objexel-search = { path = "../search" }
 objexel-rules = { path = "../rules" }
 objexel-zones = { path = "../zones" }
-oxvif = { version = "0.17", features = ["serde"] }
+oxvif = { version = "0.18", features = ["serde"] }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true
